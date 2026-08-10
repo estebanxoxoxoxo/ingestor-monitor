@@ -1,0 +1,970 @@
+/* ══════════════════════════════════════════════════════════════
+   Vista en vivo: planisferio, panel de sesiones y detalle.
+   ══════════════════════════════════════════════════════════════ */
+
+:root {
+  /* Ámbar para los números de titular; turquesa para las sesiones en el mapa. */
+  --live-accent: #ffc857;
+  --live-dot: #40e0d0;
+  --ocean: #0b1220;
+  --land: #26344f;
+  --land-line: #3a4a68;
+}
+
+/* ── Pestañas de vista ──────────────────────────────────────── */
+
+.view-tabs {
+  display: flex;
+  gap: 2px;
+  margin-left: 14px;
+  padding: 3px;
+  background: #0e141b;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+}
+
+.view-tab {
+  padding: 5px 14px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+  background: none;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.view-tab:hover {
+  color: var(--text);
+}
+
+.view-tab.active {
+  color: var(--text);
+  background: #222c38;
+}
+
+/* ── Encabezado ─────────────────────────────────────────────── */
+
+.live-view {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+/*
+ * Una sola banda horizontal. El alto lo define el contenido: manda la zona con
+ * más filas de cuadros, y las de números se centran vertical dentro de ese
+ * alto. Si las zonas no entran a lo ancho, la banda scrollea en horizontal en
+ * vez de aplastar los cuadros.
+ */
+.live-header {
+  display: flex;
+  align-items: stretch;
+  flex-shrink: 0;
+  overflow-x: auto;
+  background: linear-gradient(180deg, #131c2b, var(--bg-elevated));
+  border-bottom: 1px solid var(--border);
+}
+
+.live-zone {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 13px 18px;
+  min-width: 0;
+  border-right: 1px solid var(--border);
+}
+
+/* Centradas vertical: el alto lo fijan las zonas de eventos. */
+.zone-hero {
+  width: 168px;
+  flex-shrink: 0;
+  gap: 4px;
+  justify-content: center;
+}
+
+.zone-stats {
+  width: 178px;
+  flex-shrink: 0;
+  justify-content: center;
+}
+
+
+/* El flex-grow y el piso de ancho los pone el componente, según sus columnas. */
+.zone-group,
+.zone-relevant {
+  flex: 1 1 0;
+}
+
+.zone-count {
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--text-dim);
+  opacity: 0.7;
+}
+
+.zone-relevant {
+  border-right: none;
+}
+
+.zone-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.zone-config {
+  margin-left: auto;
+  font: inherit;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  color: var(--text-dim);
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 1px 7px;
+  cursor: pointer;
+}
+
+.zone-config:hover {
+  color: var(--text);
+  border-color: var(--text-dim);
+}
+
+.zone-hint {
+  font-size: 11px;
+  color: var(--text-dim);
+  opacity: 0.7;
+}
+
+.live-hero-value {
+  font-size: 38px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--live-accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.live-pulse {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--live-accent);
+  box-shadow: 0 0 0 0 rgb(255 200 87 / 60%);
+  animation: live-pulse 2s ease-out infinite;
+}
+
+@keyframes live-pulse {
+  70% {
+    box-shadow: 0 0 0 8px rgb(255 200 87 / 0%);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgb(255 200 87 / 0%);
+  }
+}
+
+.live-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin: 0;
+}
+
+.live-stat dt {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-dim);
+}
+
+.live-stat dd {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 3px 0 0;
+  font-size: 19px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* El agregado de los relevantes se pinta con el color de las sesiones vivas:
+   es el número que se mira cuando importa un evento en particular. */
+.live-stat dd.accent {
+  color: var(--live-dot);
+}
+
+/*
+ * Un cuadro por evento, en orden alfabético fijo, con todos los que declara el
+ * registro aunque den cero — los que tienen actividad se encienden.
+ *
+ * Grilla de columnas fijas por zona: el componente pone cuántas. El ancho del
+ * cuadro sale de dividir la zona, y como el ancho de la zona crece con su
+ * cantidad de columnas, el cuadro termina midiendo lo mismo en todas.
+ */
+.live-events {
+  display: grid;
+  align-content: start;
+  gap: 5px;
+}
+
+.live-event {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 3px;
+  height: 40px;
+  padding: 5px 9px;
+  font-size: 11px;
+  background: #0e141b;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  opacity: 0.5;
+}
+
+.live-event.active {
+  opacity: 1;
+  border-color: rgb(64 224 208 / 40%);
+  background: rgb(64 224 208 / 8%);
+}
+
+.live-event-name {
+  font-size: 9px;
+  line-height: 1.1;
+  color: var(--text-dim);
+  font-family: "Cascadia Mono", Consolas, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.live-event.active .live-event-name {
+  color: var(--text);
+}
+
+.live-event-count {
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+}
+
+.live-event.active .live-event-count {
+  color: var(--live-dot);
+}
+
+/* ── Popup de eventos relevantes ────────────────────────────── */
+
+.modal-relevant {
+  width: min(620px, 100%);
+}
+
+.relevant-body {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+  padding: 16px;
+  overflow-y: auto;
+}
+
+.relevant-body h3 {
+  display: flex;
+  justify-content: space-between;
+  margin: 0 0 8px;
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-dim);
+}
+
+.relevant-empty {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-dim);
+  opacity: 0.7;
+}
+
+.relevant-picked,
+.relevant-available {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.relevant-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  font-size: 11px;
+  background: #0e141b;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: grab;
+}
+
+.relevant-item.dragging {
+  opacity: 0.4;
+}
+
+.relevant-item.over {
+  border-color: var(--live-dot);
+  box-shadow: inset 0 2px 0 var(--live-dot);
+}
+
+.relevant-grip {
+  color: var(--text-dim);
+  letter-spacing: -2px;
+}
+
+.relevant-order {
+  min-width: 14px;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+}
+
+.relevant-name {
+  flex: 1;
+  font-family: "Cascadia Mono", Consolas, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.relevant-remove {
+  font: inherit;
+  font-size: 10px;
+  color: var(--text-dim);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0 2px;
+}
+
+.relevant-remove:hover {
+  color: var(--error);
+}
+
+.relevant-available button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 11px;
+  font-family: "Cascadia Mono", Consolas, monospace;
+  text-align: left;
+  color: var(--text-dim);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.relevant-available button:hover {
+  color: var(--text);
+  background: #0e141b;
+  border-color: var(--border);
+}
+
+.relevant-plus {
+  font-size: 13px;
+  color: var(--live-dot);
+}
+
+.relevant-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+}
+
+.relevant-footer button {
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.relevant-cancel {
+  color: var(--text-dim);
+  background: none;
+  border: 1px solid var(--border);
+}
+
+.relevant-cancel:hover {
+  color: var(--text);
+}
+
+.relevant-save {
+  color: #08111c;
+  background: var(--live-dot);
+  border: none;
+}
+
+.relevant-save:hover {
+  filter: brightness(1.1);
+}
+
+/* ── Mapa ───────────────────────────────────────────────────── */
+
+.live-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.map-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  background: var(--ocean);
+}
+
+.map-svg {
+  display: block;
+  cursor: grab;
+}
+
+.map-svg:active {
+  cursor: grabbing;
+}
+
+.map-sphere {
+  fill: none;
+}
+
+.map-country {
+  fill: var(--land);
+  stroke: var(--land-line);
+  stroke-width: 0.5;
+}
+
+/* ── Puntos: uno por sesión ─────────────────────────────────── */
+
+.map-dot {
+  cursor: pointer;
+}
+
+.dot-hit {
+  fill: transparent;
+}
+
+/*
+ * 3 px de diámetro: el punto es el dato, no la decoración. Van del mismo ámbar
+ * que "Sesiones ahora" — el número y los puntos cuentan lo mismo.
+ */
+.dot-core {
+  fill: var(--live-accent);
+  transition: r 0.12s ease;
+}
+
+/* El anillo aparece sólo al interactuar; sobre un punto de 3 px, siempre
+   visible sería más ruido que información. */
+.dot-ring {
+  fill: none;
+  stroke: var(--live-accent);
+  stroke-width: 1.2;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.dot-ping {
+  fill: var(--live-accent);
+  opacity: 0.45;
+  transform-origin: center;
+  transform-box: fill-box;
+  animation: dot-ping 2.4s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+
+@keyframes dot-ping {
+  0% {
+    transform: scale(0.6);
+    opacity: 0.55;
+  }
+  80%,
+  100% {
+    transform: scale(3.4);
+    opacity: 0;
+  }
+}
+
+.map-dot.hovered .dot-core {
+  r: 3;
+}
+
+.map-dot.hovered .dot-ring {
+  opacity: 0.9;
+  stroke-width: 1.5;
+}
+
+.map-dot.selected .dot-ring {
+  stroke: #fff;
+  stroke-width: 2;
+  opacity: 1;
+}
+
+.map-dot.selected .dot-core {
+  fill: #fff;
+}
+
+/* ── Tooltip, controles y leyenda ───────────────────────────── */
+
+.map-tip {
+  position: absolute;
+  z-index: 3;
+  transform: translate(-50%, calc(-100% - 18px));
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 7px 11px;
+  pointer-events: none;
+  white-space: nowrap;
+  background: rgb(13 17 23 / 94%);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 45%);
+}
+
+.map-tip strong {
+  font-size: 12px;
+}
+
+.map-tip span {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.map-controls {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+}
+
+.map-controls button {
+  width: 30px;
+  height: 30px;
+  font: inherit;
+  font-size: 15px;
+  color: var(--text);
+  background: rgb(21 27 35 / 94%);
+  border: none;
+  cursor: pointer;
+}
+
+.map-controls button:hover {
+  background: #222c38;
+}
+
+.map-reset {
+  font-size: 12px;
+}
+
+/* ── Panel lateral ──────────────────────────────────────────── */
+
+.live-side {
+  display: flex;
+  flex-direction: column;
+  width: 380px;
+  flex-shrink: 0;
+  min-height: 0;
+  background: var(--bg-elevated);
+  border-left: 1px solid var(--border);
+}
+
+.side-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.side-header h2 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-dim);
+}
+
+.side-header span {
+  font-size: 13px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.side-footer {
+  margin-top: auto;
+  padding: 9px 16px;
+  font-size: 10px;
+  color: var(--text-dim);
+  border-top: 1px solid var(--border);
+}
+
+.side-error {
+  color: var(--error);
+}
+
+/* ── Lista de sesiones ──────────────────────────────────────── */
+
+.session-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.session-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 16px;
+  font: inherit;
+  text-align: left;
+  color: var(--text);
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  border-left: 2px solid transparent;
+  cursor: pointer;
+}
+
+.session-item.hovered {
+  background: #1a2330;
+  border-left-color: var(--live-accent);
+}
+
+.session-item.selected {
+  background: #1a2330;
+  border-left-color: #fff;
+}
+
+/* El mismo punto que en el mapa: es el mismo objeto. */
+.session-dot {
+  width: 3px;
+  height: 3px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--live-accent);
+  box-shadow: 0 0 8px rgb(255 200 87 / 50%);
+}
+
+.session-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.session-place {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.session-place em {
+  font-style: normal;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 1px 4px;
+}
+
+.session-tag {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--warn);
+}
+
+.session-page {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-family: "Cascadia Mono", Consolas, monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.session-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  font-size: 10px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.session-events {
+  font-weight: 700;
+  color: var(--text);
+}
+
+.session-tabs {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 1px 4px;
+}
+
+.session-list-empty {
+  padding: 28px 20px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-dim);
+}
+
+.session-list-empty .dim {
+  opacity: 0.65;
+}
+
+/* ── Detalle de sesión ──────────────────────────────────────── */
+
+.session-detail {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.detail-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.detail-back {
+  font: inherit;
+  font-size: 15px;
+  color: var(--text-dim);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.detail-back:hover {
+  color: var(--text);
+}
+
+.detail-header h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.detail-sub {
+  margin: 2px 0 0;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 14px;
+  margin: 0;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.detail-grid dt {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-dim);
+}
+
+.detail-grid dd {
+  margin: 3px 0 0;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detail-grid dd.mono {
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 11px;
+  user-select: text;
+}
+
+.detail-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.detail-tag {
+  font-size: 10px;
+  color: var(--text-dim);
+  font-family: "Cascadia Mono", Consolas, monospace;
+  background: #0e141b;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 7px;
+}
+
+.detail-tag strong {
+  color: var(--text);
+}
+
+.detail-section {
+  display: flex;
+  justify-content: space-between;
+  margin: 0;
+  padding: 12px 16px 8px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-dim);
+}
+
+/* Una línea por evento, sin envolver nunca: el detalle va al popup. */
+.detail-events {
+  margin: 0;
+  padding: 0 0 16px;
+  list-style: none;
+  font-size: 11px;
+}
+
+.event-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 7px 16px;
+  font: inherit;
+  font-size: 11px;
+  text-align: left;
+  color: var(--text);
+  background: none;
+  border: none;
+  border-bottom: 1px solid #1b232d;
+  cursor: pointer;
+}
+
+.event-row:hover {
+  background: #1a2330;
+}
+
+.event-time {
+  flex-shrink: 0;
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+.event-name {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Cuántos valores trae: adelanta que hay algo que abrir. */
+.event-count {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+  background: #0e141b;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0 5px;
+}
+
+.event-chevron {
+  flex-shrink: 0;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.event-row:hover .event-chevron {
+  color: var(--text);
+}
+
+.detail-events .dim {
+  padding: 8px 16px;
+  color: var(--text-dim);
+}
+
+.modal-subtitle {
+  margin: 2px 0 0;
+  font-size: 11px;
+  color: var(--text-dim);
+  font-family: "Cascadia Mono", Consolas, monospace;
+}
+
+.zone-error {
+  font-size: 11px;
+  color: var(--error);
+}
+
+/* Avisa que la lista se dedujo de los datos en vez de estar declarada. */
+.zone-warning {
+  font-style: normal;
+  font-size: 8px;
+  letter-spacing: 0.4px;
+  color: var(--warn);
+  border: 1px solid rgb(210 153 34 / 40%);
+  border-radius: 3px;
+  padding: 1px 5px;
+}
+
+/* El porcentaje al lado del número: contexto sin robarle protagonismo. */
+.stat-suffix {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+}

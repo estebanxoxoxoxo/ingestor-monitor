@@ -1,0 +1,49 @@
+{
+  "name": "data-analizer-ops",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Data Analizer: sesiones en vivo, espejos locales de raw y bronze, y guardia del pipeline (log por parquet en Firestore + facturación AWS). La transformación vive en BigQuery",
+  "main": "./out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "start": "electron-vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "dist": "npm run build && electron-builder"
+  },
+  "dependencies": {
+    "@aws-sdk/client-cost-explorer": "^3.1103.0",
+    "@aws-sdk/client-s3": "^3.1103.0",
+    "@firebase/app": "^0.16.0",
+    "@tanstack/react-virtual": "^3.14.9",
+    "d3-geo": "^3.1.1",
+    "d3-selection": "^3.0.0",
+    "d3-transition": "^3.0.1",
+    "d3-zoom": "^3.0.0",
+    "dotenv": "^17.4.2",
+    "firebase-admin": "^14.2.0",
+    "topojson-client": "^3.1.0",
+    "world-atlas": "^2.0.2"
+  },
+  "devDependencies": {
+    "@types/d3-geo": "^3.1.1",
+    "@types/d3-selection": "^3.0.11",
+    "@types/d3-transition": "^3.0.9",
+    "@types/d3-zoom": "^3.0.8",
+    "@types/node": "^26.1.2",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "@types/topojson-client": "^3.1.5",
+    "@vitejs/plugin-react": "^5.2.0",
+    "electron": "^43.3.0",
+    "electron-builder": "^26.15.3",
+    "electron-vite": "^5.0.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "typescript": "^7.0.2",
+    "vite": "^7.3.6",
+    "vitest": "^4.1.10"
+  }
+}

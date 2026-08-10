@@ -1,0 +1,45 @@
+# ── Secretos ──────────────────────────────────────────────────
+# El .env tiene claves de AWS y la private key del service account.
+.env
+.env.*
+!.env.example
+firebase-service-account*.json
+*-service-account*.json
+*.pem
+*.key
+
+# ── Dependencias ──────────────────────────────────────────────
+node_modules/
+.pnpm-store/
+
+# ── Build ─────────────────────────────────────────────────────
+dist/
+dist-electron/
+out/
+release/
+.vite/
+*.tsbuildinfo
+
+# ── Caché de datos ────────────────────────────────────────────
+# Vive en el Escritorio, pero por si alguien apunta CACHE_DIR acá.
+data-analizer-cache/
+*.parquet
+
+# ── Logs y temporales ─────────────────────────────────────────
+*.log
+npm-debug.log*
+yarn-error.log*
+coverage/
+.cache/
+tmp/
+
+# ── Editor y SO ───────────────────────────────────────────────
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Claude Code ───────────────────────────────────────────────
+.claude/settings.local.json
