@@ -2,8 +2,6 @@ import { existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { app } from 'electron'
 import { config as loadDotenv } from 'dotenv'
-import { CACHE_DIR_NAME, DATA_DIR_NAME, RAW_CACHE_DIR_NAME } from '@shared/config'
-import type { IsoDate } from '@shared/date'
 
 export interface AppEnv {
   aws: {
@@ -21,15 +19,6 @@ export interface AppEnv {
     datePartitionKey: string
     /** Registro de contratos. Ej: 'schemas/'. */
     schemaPrefix: string
-  }
-  /** Espejo local de bronze (con los contratos de `schemas/` adentro). */
-  cacheDir: string
-  /** Espejo local de raw. */
-  rawCacheDir: string
-  sync: {
-    /** Piso absoluto de la primera sincronización. */
-    startDate: IsoDate
-    concurrency: number
   }
   /** A dónde apunta el semáforo del ingestor (probe TCP). */
   ingest: {
@@ -54,11 +43,6 @@ function envFilePath(): string {
     ? [join(dirname(app.getPath('exe')), '.env')]
     : [join(app.getAppPath(), '.env'), join(process.cwd(), '.env')]
   return candidates.find(existsSync) ?? candidates[0]
-}
-
-/** Carpeta padre de la data en disco, cuando no la fija el .env. */
-function dataRoot(): string {
-  return join(app.getPath('desktop'), DATA_DIR_NAME)
 }
 
 function required(source: NodeJS.ProcessEnv, name: string): string {
@@ -94,25 +78,19 @@ export function loadEnv(): AppEnv {
       secretAccessKey: e.AWS_SECRET_ACCESS_KEY?.trim() || undefined,
     },
     s3: {
-      bucket: required(e, 'S3_BUCKET'),
       // S3_PREFIX conserva el nombre histórico de la variable: el .env se
       // heredó por copia y bronze significa lo mismo que siempre.
+      bucket: required(e, 'S3_BUCKET'),
       bronzePrefix: withSlash(required(e, 'S3_PREFIX')),
       rawPrefix: withSlash(e.S3_RAW_PREFIX?.trim() || 'raw/v=1/'),
       datePartitionKey: e.S3_DATE_PARTITION_KEY?.trim() || 'dt',
       schemaPrefix: withSlash(schemaPrefix),
     },
-    cacheDir: e.CACHE_DIR?.trim() || join(dataRoot(), CACHE_DIR_NAME),
-    rawCacheDir: e.RAW_CACHE_DIR?.trim() || join(dataRoot(), RAW_CACHE_DIR_NAME),
-    sync: {
-      startDate: required(e, 'SYNC_START_DATE'),
-      concurrency: Math.max(1, Number(e.SYNC_CONCURRENCY) || 8),
-    },
-    // El default es la EC2 del ingest con su puerto actual; cuando el ingest
-    // pase detrás de Caddy con dominio, se ajusta acá sin tocar código.
+    // El default es la EC2 del ingest detrás de Caddy; se ajusta acá sin
+    // tocar código.
     ingest: {
-      host: e.INGEST_HOST?.trim() || '44.207.109.162',
-      port: Math.max(1, Number(e.INGEST_PORT) || 8080),
+      host: e.INGEST_HOST?.trim() || 'actasitalianasexpress.com',
+      port: Math.max(1, Number(e.INGEST_PORT) || 443),
     },
     firebase: {
       projectId: required(e, 'FIREBASE_PROJECT_ID'),

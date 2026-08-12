@@ -5,19 +5,18 @@ import type { LayerId } from '@shared/config'
 import type {
   AppSettings,
   BillingSummary,
+  DayFiles,
   EventCatalog,
-  EventsPage,
-  EventsQuery,
+  FileSample,
+  FileSampleQuery,
+  FirebaseUsage,
   FreshnessSnapshot,
   IngestStatus,
   LayerState,
   LiveSnapshot,
   RendererApi,
-  SchemaInfo,
   SettingsResult,
   StatusSnapshot,
-  SyncProgress,
-  SyncResult,
 } from '@shared/types'
 
 /**
@@ -35,12 +34,28 @@ const api: RendererApi = {
   getLiveEvent: (connectionId: string, eventId: string): Promise<unknown | null> =>
     ipcRenderer.invoke(IPC.liveEvent, connectionId, eventId),
 
-  getSchema: (): Promise<SchemaInfo> => ipcRenderer.invoke(IPC.schemaGet),
+  getLayerState: (layer: LayerId): Promise<LayerState> =>
+    ipcRenderer.invoke(IPC.layerState, layer),
 
-  getEvents: (query: EventsQuery): Promise<EventsPage> => ipcRenderer.invoke(IPC.eventsQuery, query),
+  relistLayer: (layer: LayerId): Promise<LayerState> =>
+    ipcRenderer.invoke(IPC.layerRelist, layer),
 
-  getRawEvents: (query: EventsQuery): Promise<EventsPage> =>
-    ipcRenderer.invoke(IPC.rawQuery, query),
+  getDayFiles: (layer: LayerId, day: string): Promise<DayFiles> =>
+    ipcRenderer.invoke(IPC.layerDayFiles, layer, day),
+
+  getFileSample: (query: FileSampleQuery): Promise<FileSample> =>
+    ipcRenderer.invoke(IPC.sampleFile, query),
+
+  subscribeStatus: (callback: (snapshot: StatusSnapshot) => void): (() => void) => {
+    const listener = (_event: IpcRendererEvent, snapshot: StatusSnapshot): void =>
+      callback(snapshot)
+    ipcRenderer.on(IPC.statusSnapshot, listener)
+    void ipcRenderer.invoke(IPC.statusSubscribe)
+    return () => {
+      ipcRenderer.off(IPC.statusSnapshot, listener)
+      void ipcRenderer.invoke(IPC.statusUnsubscribe)
+    }
+  },
 
   subscribeIngest: (callback: (status: IngestStatus) => void): (() => void) => {
     const listener = (_event: IpcRendererEvent, status: IngestStatus): void => callback(status)
@@ -63,33 +78,11 @@ const api: RendererApi = {
     }
   },
 
-  getLayerState: (layer: LayerId): Promise<LayerState> =>
-    ipcRenderer.invoke(IPC.layerState, layer),
-
-  runLayerSync: (layer: LayerId): Promise<SyncResult> =>
-    ipcRenderer.invoke(IPC.layerSyncRun, layer),
-
-  onLayerSyncProgress: (callback: (progress: SyncProgress) => void): (() => void) => {
-    const listener = (_event: IpcRendererEvent, progress: SyncProgress): void => callback(progress)
-    ipcRenderer.on(IPC.layerSyncProgress, listener)
-    return () => {
-      ipcRenderer.off(IPC.layerSyncProgress, listener)
-    }
-  },
-
-  subscribeStatus: (callback: (snapshot: StatusSnapshot) => void): (() => void) => {
-    const listener = (_event: IpcRendererEvent, snapshot: StatusSnapshot): void =>
-      callback(snapshot)
-    ipcRenderer.on(IPC.statusSnapshot, listener)
-    void ipcRenderer.invoke(IPC.statusSubscribe)
-    return () => {
-      ipcRenderer.off(IPC.statusSnapshot, listener)
-      void ipcRenderer.invoke(IPC.statusUnsubscribe)
-    }
-  },
-
   getBilling: (refresh: boolean): Promise<BillingSummary> =>
     ipcRenderer.invoke(IPC.billingGet, refresh),
+
+  getFirebaseUsage: (refresh: boolean): Promise<FirebaseUsage> =>
+    ipcRenderer.invoke(IPC.firebaseUsageGet, refresh),
 
   subscribeLive: (callback: (snapshot: LiveSnapshot) => void): (() => void) => {
     const listener = (_event: IpcRendererEvent, snapshot: LiveSnapshot): void => callback(snapshot)

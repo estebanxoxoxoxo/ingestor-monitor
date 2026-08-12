@@ -1,63 +1,74 @@
 # Data Analizer Ops
 
-**LA aplicación** del Analizer en el escritorio: sesiones en vivo, espejos
-locales de raw y bronze, y la guardia del pipeline y de la cuenta. La
-transformación (bronze → silver → gold) vive en BigQuery — acá no se
-transforma nada: se mira, se espeja y se vigila.
+**LA aplicación** del Analizer: quién está en el sitio ahora mismo y cómo
+está el ingestor. **Nada local** — la app no guarda data en disco: S3 se
+mira directo (listados por minuto + muestras volátiles en memoria) y lo
+persistente vive en Firebase. La transformación (bronze → silver → gold)
+vive en BigQuery.
 
 (Los proyectos `data-analizer-app` y `data-analizer-studio` fueron los
-donantes de código de esta app y quedan para retirar.)
+donantes de código y quedan para retirar; la carpeta
+`Desktop/data-analizer-data` ya no se usa.)
 
 ## Pestañas
 
 **Vivo ●** — las sesiones abiertas ahora mismo (Realtime Database):
 planisferio, sesiones, detalle de eventos. El punto rojo titila porque es
-una transmisión.
+una transmisión. Labels y grupos salen del registro de contratos, leído
+directo de S3.
 
-**Raw** y **Bronze** — cada capa del bucket con su espejo local: botón de
-sync (reglas de la casa: ventana desde la última corrida, el día en curso
-se rehace entero, los días cerrados no se borran nunca, marca de agua en
-Firestore que sólo avanza si nada falló) e inventario por partición diaria.
-Bronze se espeja a `bronze-local-cache/` con los contratos (`schemas/`)
-incluidos; raw a `raw-local-cache/`.
+**Raw** y **Bronze** — navegadores del bucket, cada una con su punto de
+frescura (verde = data de HOY UTC; naranja = de ayer a 6 días; violeta =
+una semana o más; rojo = nunca — días de calendario, jamás ventanas
+móviles). Arriba, el **log con los últimos archivos que aterrizaron** (sin
+ventana de tiempo; hoy en vivo), con **Ver** que abre la vista previa del
+archivo. Abajo, el árbol: días con
+buscador → click en un día → sus **archivos** (nombre, peso y fecha) →
+click en un nombre → el **viewer de ese archivo**, leído de S3 al momento
+vía DuckDB (httpfs) — en raw una fila por request HTTP, en bronze una por
+evento, con **Ver** por registro. Cada click paga exactamente un objeto;
+volátil: nada toca el disco, y las credenciales viajan por el entorno del
+proceso, nunca en SQL ni en la línea de comandos. El botón **Full sync** es
+la curación manual: relista TODO el bucket y reconcilia el índice.
 
-**Status** — la guardia:
+**Status** — la guardia: el semáforo del ingestor (probe TCP cada 5 min),
+la facturación AWS del mes (una consulta al abrir + botón, US$ 0,01 cada
+una) y el **uso de Firebase** vía Cloud Monitoring — lecturas, escrituras y
+borrados de Firestore de HOY, y bajada/conexiones/almacenamiento de la
+RTDB (una consulta al abrir + botón; gratis a este volumen). El log de
+ingestados vive en la pestaña de cada capa.
 
-- **El log de ingestados**: un vigía en main lista la partición de HOY
-  (UTC) cada minuto y de ese único listado salen las dos caras de la
-  misma ventana — el contador del header (número) y el log (detalle),
-  ordenado por el aterrizaje real en S3. **Sin persistencia**: se rearma
-  fresco en cada pasada; el bucket es la única fuente de verdad. Lo
-  anterior a hoy se mira en los espejos de Raw y Bronze.
-- **Facturación AWS**: total del mes en curso (UTC) con desglose por
-  servicio, vía Cost Explorer. Cada consulta cuesta US$ 0,01 — se cachea
-  y se re-consulta sólo con el botón.
+## El índice (Firestore) y quién lo alimenta
 
-## Permisos IAM (estado real)
+El índice del bucket vive en Firestore como relación de colecciones —
+`inventory/{capa}/days/{día}` (marcador) `/files/{nombre}` (peso y fecha) —
+y **sólo hechos**: nada derivado. Los totales por día se piden con
+agregaciones del lado del servidor (viajan números, no documentos).
 
-El usuario `data-analizer-reader` hoy puede listar **sólo**
-`bronze/v=1/*` y `schemas/*` (verificado contra el bucket). Para
-completar Ops hay que extenderle la política:
-
-- **Raw**: `s3:ListBucket` (condición de prefijo `raw/*`) y
-  `s3:GetObject` sobre `arn:aws:s3:::ingest-bucket-1985/raw/*`.
-- **Facturación**: la acción `ce:GetCostAndUsage` (y Cost Explorer
-  habilitado en la cuenta).
-
-Hasta entonces, la pestaña Raw y la tarjeta de facturación muestran el
-motivo exacto en pantalla; Bronze, Vivo y el vigía de bronze andan hoy.
+Lo alimenta **exclusivamente la Lambda de las notificaciones de S3**
+(carpeta `infra/`, un paste de CloudShell): cada archivo que aterriza está
+en el índice en segundos, con la app cerrada. **La app tiene UNA sola
+fuente: Firebase** — se suscribe (`onSnapshot` de HOY) y lee días y
+archivos de Firestore; jamás lista S3 por su cuenta. S3 se toca en
+exactamente dos lugares: el **viewer** (el contenido de un archivo, de a
+uno) y el **Full sync** — el escaneo manual que REPARA el índice cuando se
+perdió la confianza (fantasmas por borrados a mano, notificaciones
+perdidas, Lambda caída), pisando el árbol por diff sin borrar nada nacido
+después del inicio del escaneo. Sin la Lambda instalada el índice no crece
+solo: Full sync es el remedio.
 
 ## Arranque
 
 ```bash
 npm install
-copy .env.example .env   # o copiar el .env de la ETL y agregar S3_RAW_PREFIX
+winget install DuckDB.cli    # para las muestras
+copy .env.example .env       # completar credenciales
 npm run dev
 ```
 
 ## Tests
 
 ```bash
-npm test        # diff del vigía, parseo de la RTDB, catálogo, fechas
+npm test        # parseo de la RTDB, precedencia del catálogo, frescura
 npm run typecheck
 ```

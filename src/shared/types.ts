@@ -1,7 +1,6 @@
 /** Contrato entre el proceso main y el renderer. */
 
 import type { LayerId } from './config'
-import type { IsoDate } from './date'
 
 /**
  * Superficie que el preload expone al renderer como `window.api`.
@@ -22,31 +21,29 @@ export interface RendererApi {
    */
   getLiveEvent(connectionId: string, eventId: string): Promise<unknown | null>
 
-  /** Estado del espejo local de una capa (última sync, inventario por día). */
+  /** El índice de la capa (días, totales), de la foto del vigía. */
   getLayerState(layer: LayerId): Promise<LayerState>
-  /** Sincroniza una capa del bucket al espejo local. */
-  runLayerSync(layer: LayerId): Promise<SyncResult>
-  /** Avance de las syncs, con la capa adentro. Devuelve el des-suscriptor. */
-  onLayerSyncProgress(callback: (progress: SyncProgress) => void): () => void
+  /** Curación manual: relista TODO el bucket y reconcilia el índice. */
+  relistLayer(layer: LayerId): Promise<LayerState>
+  /** Los archivos de UN día, del índice (Firestore/vigía) — metadata, no data. */
+  getDayFiles(layer: LayerId, day: string): Promise<DayFiles>
+  /** El contenido de UN archivo, pedido a S3 al momento — volátil, nada local. */
+  getFileSample(query: FileSampleQuery): Promise<FileSample>
 
-  /** El contrato del envelope de bronze, para las columnas de la tabla. */
-  getSchema(): Promise<SchemaInfo>
-  /** Eventos de bronze (con corte por día para el drill-in del inventario). */
-  getEvents(query: EventsQuery): Promise<EventsPage>
-  /** Requests crudas de un día de raw: recepción, ruta, payload completo. */
-  getRawEvents(query: EventsQuery): Promise<EventsPage>
+  /** Feed del vigía (contador y log de hoy). Devuelve el des-suscriptor. */
+  subscribeStatus(callback: (snapshot: StatusSnapshot) => void): () => void
 
   /** Semáforo del ingestor (probe TCP periódico). Devuelve el des-suscriptor. */
   subscribeIngest(callback: (status: IngestStatus) => void): () => void
 
-  /** Frescura de cada capa contra la caché local. Devuelve el des-suscriptor. */
+  /** Frescura de cada capa contra el bucket. Devuelve el des-suscriptor. */
   subscribeFreshness(callback: (snapshot: FreshnessSnapshot) => void): () => void
-
-  /** Feed del pipeline (suscripción a Firestore). Devuelve el des-suscriptor. */
-  subscribeStatus(callback: (snapshot: StatusSnapshot) => void): () => void
 
   /** Facturación de la cuenta AWS. refresh=true consulta de nuevo (US$ 0,01). */
   getBilling(refresh: boolean): Promise<BillingSummary>
+
+  /** Uso de Firestore y la RTDB (Cloud Monitoring). refresh=true re-consulta. */
+  getFirebaseUsage(refresh: boolean): Promise<FirebaseUsage>
 }
 
 /** Preferencias que se guardan en Firestore, no en la máquina. */
@@ -84,9 +81,9 @@ export interface EventDefinition {
 }
 
 /**
- * Los eventos que existen. Sale del archivo declarado en el registro que la
- * sync de Bronze espeja junto con la capa; si no está publicado, se cae a lo
- * último guardado en Firestore.
+ * Los eventos que existen. Sale del registro declarado, leído DIRECTO de S3
+ * (`schemas/<v>/events_v<v>.json`); si no está publicado, se cae a lo último
+ * guardado en Firestore.
  */
 export interface EventCatalog {
   events: EventDefinition[]
@@ -102,52 +99,11 @@ export interface SettingsResult {
   error?: string
 }
 
-// ── Sincronización por capa ────────────────────────────────────
+// ── Capas: el índice del bucket ────────────────────────────────
+// Nada local: el índice vive en FIRESTORE como relación de colecciones
+// (días → archivos) y el vigía lo mantiene con lo que descubre en `dt=hoy`.
 
-export type SyncPhase =
-  | 'idle'
-  | 'reading-state'
-  | 'listing'
-  | 'downloading'
-  | 'saving-state'
-  | 'done'
-  | 'error'
-
-export interface SyncProgress {
-  layer: LayerId
-  phase: SyncPhase
-  message: string
-  filesDone: number
-  filesTotal: number
-  bytesDone: number
-  bytesTotal: number
-}
-
-export interface SyncFailure {
-  key: string
-  date: IsoDate | null
-  error: string
-}
-
-export interface SyncResult {
-  layer: LayerId
-  ok: boolean
-  /** Días recorridos, ambos extremos inclusive. El último es hoy. */
-  from: IsoDate | null
-  to: IsoDate | null
-  downloaded: number
-  /** Archivos que ya estaban en el espejo con el mismo tamaño. */
-  skipped: number
-  /** Archivos del día en curso que se descartaron para rehacerlo. */
-  discarded: number
-  bytes: number
-  /** Instante que quedó registrado en Firestore, ISO en UTC. */
-  lastSyncAt: string | null
-  failures: SyncFailure[]
-  error?: string
-}
-
-/** Una partición diaria del espejo local. */
+/** Una partición diaria de la capa en el bucket. */
 export interface LayerDay {
   date: string
   files: number
@@ -156,72 +112,100 @@ export interface LayerDay {
 
 export interface LayerState {
   layer: LayerId
-  /** Instante de la última sincronización exitosa, ISO en UTC. */
-  lastSyncAt: string | null
-  cacheDir: string
+  /** Instante del último refresco del índice, ISO en UTC. null = cargando. */
+  listedAt: string | null
   files: number
   bytes: number
-  /** Particiones diarias del espejo, la más nueva primero. */
+  /** Particiones diarias, la más nueva primero. */
   days: LayerDay[]
-  /** Config rota (.env incompleto, credenciales inválidas). */
+  /** Los últimos archivos que aterrizaron — sin ventana: el log de la capa. */
+  latest: PipelineLogEntry[]
+  /** El índice no se pudo leer (Firestore) o reparar (Full sync). */
   error?: string
 }
 
-// ── Bronze: esquema declarado y tabla de eventos ───────────────
+// ── El día en archivos, y el viewer de un archivo ──────────────
+// El índice (días → archivos, con peso y fecha que el LIST trajo gratis)
+// vive en Firestore: abrir un día lee NOMBRES, jamás data. La data se toca
+// recién al abrir un archivo en el viewer — un objeto por click, volátil.
 
-export interface EventColumn {
+export interface DayFileEntry {
   name: string
-  /** Tipo físico declarado en el .schema. Ej: `binary`, `int64`. */
-  physicalType: string
-  /** Anotación lógica del .schema. Ej: `STRING`, `TIMESTAMP(MICROS,true)`. */
-  logicalType: string | null
-  optional: boolean
+  size: number
+  /** Instante del archivo (época del nombre, o LastModified). ISO en UTC. */
+  at: string | null
 }
 
-export interface SchemaInfo {
-  /** Versiones de schema_version encontradas en la data del espejo. */
-  versions: string[]
-  /** Nombre del message del .schema. Ej: `analytics_event_v1`. */
-  messageName: string | null
-  columns: EventColumn[]
-  /** Archivos .schema efectivamente leídos. */
-  sources: string[]
+export interface DayFiles {
+  layer: LayerId
+  day: string
+  /** Más nuevo primero. */
+  files: DayFileEntry[]
+  bytes: number
   error?: string
 }
 
-export type SortDirection = 'desc' | 'asc'
-
-export interface EventsQuery {
-  sortColumn: string | null
-  sortDirection: SortDirection
-  /** Corte por partición diaria (drill-in del inventario). null = todo. */
-  day: string | null
-  limit: number
-  offset: number
+export interface FileSampleQuery {
+  layer: LayerId
+  /** 'YYYY-MM-DD' (UTC). */
+  day: string
+  /** Nombre del archivo dentro de la partición del día. */
+  file: string
 }
 
-export interface EventsPage {
+/**
+ * El contenido de un archivo para el viewer. `columns` declara qué mostrar
+ * y en qué orden; las filas pueden traer claves extra (p. ej. `registro` en
+ * raw) que la vista usa para el popup de Ver.
+ */
+export interface FileSample {
+  columns: string[]
   rows: Record<string, unknown>[]
-  total: number
-  limit: number
-  offset: number
+  /** true = el archivo tenía más filas que el tope del viewer y se cortó. */
+  truncated: boolean
   error?: string
 }
 
-// ── Frescura de las capas (contra la caché local) ──────────────
+// ── El log de cada capa ────────────────────────────────────────
+// Un renglón por archivo aterrizado; viaja en LayerState.latest (los
+// últimos, sin ventana de tiempo), derivado del índice de Firebase.
+
+export interface PipelineLogEntry {
+  id: string
+  layer: LayerId
+  /** Key completa en el bucket. */
+  key: string
+  /** Último segmento de la key, para la tabla. */
+  file: string
+  size: number
+  /** El aterrizaje real en S3, ISO en UTC. */
+  lastModified: string | null
+}
+
+// ── Status: el contador de hoy ─────────────────────────────────
+// El log vive en cada pestaña de capa; acá quedan el contador y los avisos.
+
+export interface StatusSnapshot {
+  /** Batches que aterrizaron HOY (UTC), por capa. null = índice sin cargar. */
+  today: Record<LayerId, number | null>
+  /** Qué capas no puede leer el vigía, con el motivo. */
+  layerErrors: Partial<Record<LayerId, string>>
+}
+
+// ── Frescura de las capas (contra el bucket) ───────────────────
 
 /**
  * En DÍAS UTC de calendario, nunca ventanas móviles: verde = hay data de
  * HOY · naranja = lo más nuevo es de ayer a 6 días · violeta = una semana o
- * más · rojo = la caché nunca recibió nada.
+ * más · rojo = la capa nunca recibió nada.
  */
 export type LayerFreshnessState = 'green' | 'orange' | 'violet' | 'red'
 
 export interface LayerFreshness {
   state: LayerFreshnessState
   /**
-   * Instante del dato más nuevo del espejo local, ISO en UTC. Sale del
-   * prefijo de época de los archivos que escribe Vector. null = espejo vacío.
+   * Instante del dato más nuevo de la capa en el bucket, ISO en UTC. Sale
+   * del prefijo de época de los archivos que escribe Vector. null = vacía.
    */
   lastDataAt: string | null
 }
@@ -242,34 +226,6 @@ export interface IngestStatus {
   error?: string
 }
 
-// ── Status: el log de ingestados ───────────────────────────────
-// Derivado EN MEMORIA del listado del vigía (hoy + ayer, UTC), sin
-// persistencia: el bucket es la única fuente de verdad y la info se rearma
-// fresca en cada pasada.
-
-export interface PipelineLogEntry {
-  id: string
-  layer: LayerId
-  /** Key completa en el bucket. */
-  key: string
-  /** Último segmento de la key, para la tabla. */
-  file: string
-  size: number
-  /** LastModified del objeto en S3 (el aterrizaje real), ISO en UTC. */
-  lastModified: string | null
-}
-
-export interface StatusSnapshot {
-  entries: PipelineLogEntry[]
-  /**
-   * Batches que aterrizaron HOY (UTC) en el bucket, por capa. Lo deduce el
-   * vigía de cada listado; null = capa sin listar.
-   */
-  today: Record<LayerId, number | null>
-  /** Qué capas no puede listar el watcher, con el motivo (típico: IAM). */
-  layerErrors: Partial<Record<LayerId, string>>
-}
-
 // ── Facturación AWS ────────────────────────────────────────────
 
 export interface BillingService {
@@ -287,6 +243,37 @@ export interface BillingSummary {
   /** Desglose por servicio, de mayor a menor. */
   byService: BillingService[]
   /** Cuándo se consultó, ISO en UTC. La consulta cuesta US$ 0,01: se cachea. */
+  fetchedAt: string | null
+  error?: string
+}
+
+// ── Uso de Firebase (Cloud Monitoring) ─────────────────────────
+
+/**
+ * El consumo de Firestore y de la Realtime Database, con la misma fuente
+ * que el panel de la consola (Cloud Monitoring; gratis a este volumen).
+ * Los contadores son de HOY (UTC); los gauges (conexiones, almacenado) son
+ * el valor actual. null = la métrica no se pudo leer o no tiene datos.
+ */
+export interface FirebaseUsage {
+  /** Ventana de los contadores: de la medianoche UTC a la consulta. */
+  from: string
+  to: string
+  /** Firestore hoy: documentos leídos / escritos / borrados. */
+  reads: number | null
+  writes: number | null
+  deletes: number | null
+  /**
+   * Firestore: bytes almacenados (documentos + índices, lo que factura como
+   * "stored data"). El EGRESO de Firestore no lo publica Cloud Monitoring:
+   * se mira en el panel Usage de la consola.
+   */
+  firestoreStorageBytes: number | null
+  /** RTDB: bytes bajados en el MES (su capa gratuita es mensual). */
+  rtdbDownloadedBytes: number | null
+  /** RTDB: conexiones AHORA y bytes almacenados (total actual). */
+  rtdbActiveConnections: number | null
+  rtdbStorageBytes: number | null
   fetchedAt: string | null
   error?: string
 }

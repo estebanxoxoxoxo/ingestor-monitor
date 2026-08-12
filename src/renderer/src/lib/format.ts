@@ -15,6 +15,12 @@ export function formatUtcTime(iso: string): string {
   return `${new Date(iso).toISOString().slice(11, 19)} UTC`
 }
 
+/** 'YYYY-MM-DD HH:MM:SS UTC': para archivos, los segundos importan. */
+export function formatUtcStamp(iso: string): string {
+  const text = new Date(iso).toISOString()
+  return `${text.slice(0, 10)} ${text.slice(11, 19)} UTC`
+}
+
 /** Duración compacta: 45s, 12m 30s, 1h 04m. */
 export function formatDuration(seconds: number): string {
   const total = Math.max(0, Math.round(seconds))

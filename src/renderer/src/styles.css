@@ -518,6 +518,8 @@ body {
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--bg-elevated);
+  /* Que el panel pueda achicarse: lo ancho lo resuelve el scroll interno. */
+  min-width: 0;
 }
 
 .ops-title {
@@ -580,13 +582,18 @@ body {
   color: var(--text-dim);
 }
 
-/* Fila clickeable del inventario de Bronze: abre los eventos del día. */
+/* Fila clickeable del inventario: abre el día, o el archivo. */
 .ops-row-click {
   cursor: pointer;
 }
 
-.ops-row-click:hover td {
-  background: color-mix(in srgb, var(--live-dot) 8%, transparent);
+/* El hover tiene que GANARLE a la raya: `.ops-table.striped tbody
+   tr:nth-child(odd) td` pesa más que una clase sola, así que en las filas
+   claras el resaltado no llegaba a aplicarse. Se nombra la tabla para
+   superarla. */
+.ops-table tbody tr.ops-row-click:hover td,
+.ops-table.striped tbody tr.ops-row-click:hover td {
+  background: color-mix(in srgb, var(--live-dot) 22%, transparent);
 }
 
 /* La frescura de cada capa contra la caché local, en días UTC de
@@ -655,6 +662,98 @@ body {
 }
 
 .day-back:hover {
+  border-color: var(--live-dot);
+}
+
+.day-back:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* El VER de cada muestra: trae el contenido de S3 y abre el popup. */
+.ver-btn {
+  padding: 2px 12px;
+  border: 1px solid color-mix(in srgb, var(--live-dot) 45%, var(--border));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--live-dot) 10%, transparent);
+  color: var(--live-dot);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.ver-btn:hover {
+  background: color-mix(in srgb, var(--live-dot) 20%, transparent);
+}
+
+/* Celda con JSON adentro (context, properties, traits, integrations): se
+   muestra su resumen y abre el visor. */
+.json-cell {
+  max-width: 100%;
+  padding: 1px 8px;
+  border: 1px dashed color-mix(in srgb, var(--live-dot) 40%, var(--border));
+  border-radius: 6px;
+  background: transparent;
+  color: var(--live-dot);
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.json-cell:hover {
+  background: color-mix(in srgb, var(--live-dot) 14%, transparent);
+}
+
+/* Tabla ancha (el detalle de un parquet trae TODAS sus columnas, vengan o
+   no con valor): scrollea ella sola, sin empujar el panel ni la ventana.
+   `min-width: 0` es lo que permite que el hijo de un flex se achique en vez
+   de estirar al padre; sin eso no hay scroll, hay desborde. */
+.ops-scroll {
+  overflow-x: auto;
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* Adentro del scroll la tabla toma el ancho de sus columnas, no el del
+   panel: así cada columna respira y el scroll hace su trabajo. */
+.ops-scroll .ops-table {
+  width: max-content;
+  min-width: 100%;
+}
+
+/* Celda de texto: se recorta con puntos suspensivos y el valor completo
+   queda en el tooltip. */
+.ops-cell {
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Cabecera de panel con buscador a la derecha. */
+.ops-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ops-filter {
+  width: 220px;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 12px;
+  font-family: 'Cascadia Mono', Consolas, monospace;
+}
+
+.ops-filter:focus {
+  outline: none;
   border-color: var(--live-dot);
 }
 

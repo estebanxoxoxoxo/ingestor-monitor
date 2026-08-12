@@ -1,6 +1,6 @@
 /**
  * Catálogo DECLARADO de eventos: `schemas/<versión>/events_v<versión>.json`,
- * espejado en la caché por la sync de Bronze.
+ * leído DIRECTO de S3 (nada local).
  *
  * Hace falta porque los datos no pueden responder la pregunta: `event` es un
  * STRING abierto y un `SELECT DISTINCT` dice qué ocurrió, nunca qué puede
@@ -23,97 +23,22 @@
  * Cualquier otra forma se ignora. Soportar formatos que nadie publica es
  * código sin ejercitar que promete algo no comprobado.
  */
-import { readFile, readdir } from 'node:fs/promises'
-import { join } from 'node:path'
-import type { EventColumn, EventDefinition, EventGroup } from '@shared/types'
-
-// ── Contrato del envelope: bronze_v<versión>.schema ────────────
-// Es el esquema Parquet en texto:
-//
-//   message analytics_event_v1 {
-//     optional binary message_id (STRING);
-//     optional int64 received_at (TIMESTAMP(MICROS,true));
-//   }
-//
-// Las columnas de la tabla NO se deducen mirando un Parquet de muestra: se
-// leen de acá. Sniffear daría un set distinto según el archivo que toque.
-
-const MESSAGE_RE = /^\s*message\s+(\S+)\s*\{/
-const FIELD_RE = /^\s*(optional|required|repeated)\s+(\S+)\s+(\S+?)\s*(?:\((.+)\))?\s*;\s*$/
-
-export interface ParsedSchema {
-  messageName: string | null
-  columns: EventColumn[]
-}
-
-export function parseSchema(text: string): ParsedSchema {
-  let messageName: string | null = null
-  const columns: EventColumn[] = []
-
-  for (const line of text.split(/\r?\n/)) {
-    if (!messageName) {
-      const message = line.match(MESSAGE_RE)
-      if (message) {
-        messageName = message[1]
-        continue
-      }
-    }
-    const field = line.match(FIELD_RE)
-    if (!field) continue
-    columns.push({
-      name: field[3],
-      physicalType: field[2],
-      logicalType: field[4] ?? null,
-      optional: field[1] === 'optional',
-    })
-  }
-
-  return { messageName, columns }
-}
-
-/** Ruta del contrato de una versión dentro de la caché. */
-export function schemaFilePath(cacheDir: string, version: string): string {
-  return join(cacheDir, 'schemas', version, `bronze_v${version}.schema`)
-}
-
-export async function readSchemaFile(
-  cacheDir: string,
-  version: string,
-): Promise<ParsedSchema & { source: string }> {
-  const source = schemaFilePath(cacheDir, version)
-  const text = await readFile(source, 'utf8')
-  return { ...parseSchema(text), source }
-}
-
-// ── Catálogo declarado de eventos ──────────────────────────────
+import type { EventDefinition, EventGroup } from '@shared/types'
 
 export interface DeclaredEvents {
   events: EventDefinition[]
   groups: EventGroup[]
 }
 
-export async function readDeclaredEvents(cacheDir: string): Promise<DeclaredEvents | null> {
-  const root = join(cacheDir, 'schemas')
-  let versions: string[]
-  try {
-    versions = (await readdir(root, { withFileTypes: true }))
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => entry.name)
-  } catch {
-    return null // todavía no se espejó el registro (correr Bronze sync)
-  }
-
+/**
+ * Une los catálogos de todas las versiones publicadas (los JSON ya
+ * parseados). Pura: quien la llama decide de dónde vienen los archivos.
+ */
+export function declaredEventsOf(parsedFiles: unknown[]): DeclaredEvents | null {
   const byName = new Map<string, EventDefinition>()
   const groups = new Map<string, EventGroup>()
 
-  for (const version of versions) {
-    let parsed: unknown
-    try {
-      parsed = JSON.parse(await readFile(join(root, version, `events_v${version}.json`), 'utf8'))
-    } catch {
-      continue // esa versión no publicó catálogo
-    }
-
+  for (const parsed of parsedFiles) {
     for (const block of blocksOf(parsed)) {
       groups.set(block.group.name, block.group)
       for (const item of block.items) {
@@ -123,8 +48,8 @@ export async function readDeclaredEvents(cacheDir: string): Promise<DeclaredEven
     }
   }
 
-  // Un archivo presente pero sin grupos válidos es lo mismo que no tenerlo:
-  // no se puede afirmar un catálogo con él.
+  // Archivos presentes pero sin grupos válidos es lo mismo que no tenerlos:
+  // no se puede afirmar un catálogo con eso.
   if (groups.size === 0) return null
   return {
     events: [...byName.values()].sort((a, b) => a.label.localeCompare(b.label)),

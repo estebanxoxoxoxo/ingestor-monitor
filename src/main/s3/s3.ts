@@ -1,8 +1,5 @@
-import { createWriteStream } from 'node:fs'
-import { mkdir, rename } from 'node:fs/promises'
-import { dirname } from 'node:path'
-import { pipeline } from 'node:stream/promises'
 import { GetObjectCommand, ListObjectsV2Command, S3Client } from '@aws-sdk/client-s3'
+import type { LayerId } from '@shared/config'
 import type { IsoDate } from '@shared/date'
 import type { AppEnv } from '../env'
 
@@ -11,7 +8,7 @@ export interface RemoteObject {
   size: number
   /** Partición diaria a la que pertenece, si la key la declara. */
   date: IsoDate | null
-  /** LastModified del objeto, ISO en UTC. El watcher lo registra en el log. */
+  /** LastModified del objeto, ISO en UTC: el aterrizaje real en el bucket. */
   lastModified: string | null
 }
 
@@ -30,7 +27,17 @@ export function createS3Client(env: AppEnv): S3Client {
   })
 }
 
-/** Lista un prefijo completo, paginando. */
+/** El prefijo de una capa en el bucket. */
+export function layerPrefix(env: AppEnv, layer: LayerId): string {
+  return layer === 'bronze' ? env.s3.bronzePrefix : env.s3.rawPrefix
+}
+
+/** El prefijo de UNA partición diaria de la capa. */
+export function dayPrefix(env: AppEnv, layer: LayerId, day: IsoDate): string {
+  return `${layerPrefix(env, layer)}${env.s3.datePartitionKey}=${day}/`
+}
+
+/** Lista un prefijo completo, paginando (mil claves por request). */
 export async function listPrefix(
   client: S3Client,
   env: AppEnv,
@@ -64,35 +71,13 @@ export async function listPrefix(
   return out
 }
 
-/**
- * Una partición diaria de la capa dada. Se lista día por día en vez de todo
- * el prefijo de una porque así la ventana queda acotada y el policy de IAM
- * puede seguir exigiendo prefijo.
- */
-export function listDay(
+/** El cuerpo de un objeto como texto, EN MEMORIA — nada toca el disco. */
+export async function getObjectText(
   client: S3Client,
   env: AppEnv,
-  layerPrefix: string,
-  date: IsoDate,
-): Promise<RemoteObject[]> {
-  return listPrefix(client, env, `${layerPrefix}${env.s3.datePartitionKey}=${date}/`)
-}
-
-/**
- * Descarga a un `.part` y recién ahí renombra. Sin esto, un corte a mitad de
- * descarga dejaría un archivo incompleto que el diff siguiente daría por bueno.
- */
-export async function downloadObject(
-  client: S3Client,
-  bucket: string,
   key: string,
-  destPath: string,
-): Promise<void> {
-  const res = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }))
+): Promise<string> {
+  const res = await client.send(new GetObjectCommand({ Bucket: env.s3.bucket, Key: key }))
   if (!res.Body) throw new Error(`Respuesta sin cuerpo para ${key}`)
-
-  await mkdir(dirname(destPath), { recursive: true })
-  const partPath = `${destPath}.part`
-  await pipeline(res.Body as NodeJS.ReadableStream, createWriteStream(partPath))
-  await rename(partPath, destPath)
+  return res.Body.transformToString('utf8')
 }

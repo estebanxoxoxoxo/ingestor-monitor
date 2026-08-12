@@ -1,8 +1,8 @@
 {
-  "name": "data-analizer-ops",
+  "name": "session-ingest-monitor",
   "version": "0.1.0",
   "private": true,
-  "description": "Data Analizer: sesiones en vivo, espejos locales de raw y bronze, y guardia del pipeline (log por parquet en Firestore + facturación AWS). La transformación vive en BigQuery",
+  "description": "Session Ingest Monitor: el viewer de escritorio del pipeline — sesiones en vivo, índice del lake en Firestore con viewer de archivos directo del bucket, y guardia del ingestor (semáforo, facturación y uso de Firebase). La transformación vive en BigQuery",
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
@@ -11,13 +11,15 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "dist": "npm run build && electron-builder"
+    "dist": "npm run build && electron-builder",
+    "infra:index": "bash infra/scripts/deploy-lake-index.sh",
+    "infra:vector": "bash infra/scripts/deploy-vector-config.sh",
+    "infra:caddy": "bash infra/scripts/deploy-caddy-config.sh"
   },
   "dependencies": {
     "@aws-sdk/client-cost-explorer": "^3.1103.0",
     "@aws-sdk/client-s3": "^3.1103.0",
     "@firebase/app": "^0.16.0",
-    "@tanstack/react-virtual": "^3.14.9",
     "d3-geo": "^3.1.1",
     "d3-selection": "^3.0.0",
     "d3-transition": "^3.0.1",

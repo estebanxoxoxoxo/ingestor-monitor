@@ -74,22 +74,54 @@ export class DuckdbNotFoundError extends Error {
  * La zona horaria se fija en UTC en cada invocación: por defecto DuckDB
  * serializa los TIMESTAMP WITH TIME ZONE en la zona local de la máquina, y
  * acá todo el análisis es en UTC.
+ *
+ * `extraEnv` viaja por el ENTORNO del proceso hijo, nunca por la línea de
+ * comandos: es cómo httpfs recibe las credenciales de S3 sin exponerlas en
+ * la lista de procesos.
  */
-export async function query<T = Record<string, unknown>>(sql: string): Promise<T[]> {
+export async function query<T = Record<string, unknown>>(
+  sql: string,
+  extraEnv?: NodeJS.ProcessEnv,
+): Promise<T[]> {
   const binary = duckdbPath()
   try {
     const { stdout } = await execFileAsync(binary, ['-json', '-c', `SET TimeZone='UTC'; ${sql}`], {
       maxBuffer: MAX_OUTPUT_BYTES,
       windowsHide: true,
+      ...(extraEnv ? { env: { ...process.env, ...extraEnv } } : {}),
     })
-    const text = stdout.trim()
-    return text ? (JSON.parse(text) as T[]) : []
+    return parseResults<T>(stdout.trim())
   } catch (error) {
     const err = error as NodeJS.ErrnoException & { stderr?: string }
     if (err.code === 'ENOENT') throw new DuckdbNotFoundError()
     const detail = err.stderr?.trim()
     throw new Error(detail || err.message)
   }
+}
+
+/**
+ * `-json` imprime UN array por cada sentencia con salida. El prelude de
+ * httpfs (`CREATE SECRET`) imprime su `[{"Success": true}]` antes del
+ * resultado real, así que vale el ÚLTIMO documento del stdout. Los cortes
+ * son inequívocos: dentro de un documento JSON ninguna línea arranca con
+ * `[` (los saltos dentro de strings viajan escapados como \n).
+ */
+function parseResults<T>(text: string): T[] {
+  if (!text) return []
+  const documents = text.split(/\r?\n(?=\[)/)
+  const last = JSON.parse(documents[documents.length - 1]) as T[]
+  // Si la consulta no imprimió filas, el último documento es el ack del
+  // CREATE SECRET: eso no es data.
+  if (
+    documents.length >= 1 &&
+    last.length === 1 &&
+    typeof last[0] === 'object' &&
+    last[0] !== null &&
+    JSON.stringify(Object.keys(last[0])) === '["Success"]'
+  ) {
+    return []
+  }
+  return last
 }
 
 /** Literal de string para SQL. */

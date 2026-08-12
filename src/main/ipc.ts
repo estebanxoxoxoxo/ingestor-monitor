@@ -5,126 +5,160 @@ import type { LayerId } from '@shared/config'
 import type {
   AppSettings,
   BillingSummary,
+  DayFiles,
   EventCatalog,
-  EventsPage,
-  EventsQuery,
+  FileSample,
+  FileSampleQuery,
+  FirebaseUsage,
   LayerState,
-  SchemaInfo,
   SettingsResult,
-  SyncResult,
 } from '@shared/types'
 import { getBilling, startBillingRefresh } from './billing/billingService'
-import { getEvents, getSchema } from './events/eventsService'
+import { getFirebaseUsage, startFirebaseUsage } from './status/firebaseUsage'
+import { baseName, instantOf } from './inventory/indexMath'
+import {
+  dayObjects,
+  getLayerState,
+  relistLayer,
+  startInventory,
+  subscribeFreshness,
+  subscribeStatus,
+} from './inventory/inventoryService'
 import { getLiveEvent, subscribeLive } from './live/liveService'
-import { getRawEvents } from './raw/rawService'
+import { getFileSample } from './sample/sampleService'
 import { getEventCatalog } from './settings/catalogService'
 import { readSettings, writeSettings } from './settings/settingsService'
 import { startPinger, subscribeIngest } from './status/ingestPinger'
-import { pokeFreshness, startFreshness, subscribeFreshness } from './status/layerFreshness'
-import { startWatcher, subscribeStatus } from './status/statusService'
-import { getLayerState, runLayerSync } from './sync/syncService'
-
-/** Una sync por capa a la vez: dos corridas de la misma capa se pisarían. */
-const running = new Set<LayerId>()
 
 const asLayer = (value: unknown): LayerId => (value === 'raw' ? 'raw' : 'bronze')
 
-const failedResult = (layer: LayerId, error: string): SyncResult => ({
-  layer,
-  ok: false,
-  from: null,
-  to: null,
-  downloaded: 0,
-  skipped: 0,
-  discarded: 0,
-  bytes: 0,
-  lastSyncAt: null,
-  failures: [],
-  error,
-})
-
 export function registerIpc(): void {
-  // El vigía, la facturación, el semáforo y la frescura arrancan con la
-  // app: se alimentan aunque nadie esté mirando Status.
-  startWatcher()
-  startBillingRefresh()
+  // El vigía, el semáforo y la facturación arrancan con la app: se
+  // alimentan aunque nadie esté mirando.
+  startInventory()
   startPinger()
-  startFreshness()
+  startBillingRefresh()
+  startFirebaseUsage()
 
-  // ── Capas: estado y sincronización ───────────────────────────
+  // ── Capas: índice del bucket y viewer de archivos ────────────
 
-  ipcMain.handle(IPC.layerState, async (_event, rawLayer: unknown): Promise<LayerState> => {
+  ipcMain.handle(IPC.layerState, (_event, rawLayer: unknown): LayerState => {
+    return getLayerState(asLayer(rawLayer))
+  })
+
+  ipcMain.handle(IPC.layerRelist, async (_event, rawLayer: unknown): Promise<LayerState> => {
     const layer = asLayer(rawLayer)
     try {
-      return await getLayerState(layer)
+      return await relistLayer(layer)
     } catch (error) {
       return {
         layer,
-        lastSyncAt: null,
-        cacheDir: '',
+        listedAt: null,
         files: 0,
         bytes: 0,
         days: [],
+        latest: [],
         error: messageOf(error),
       }
     }
   })
 
-  ipcMain.handle(IPC.layerSyncRun, async (event, rawLayer: unknown): Promise<SyncResult> => {
-    const layer = asLayer(rawLayer)
-    if (running.has(layer)) {
-      return failedResult(layer, 'Ya hay una sincronización de esta capa en curso.')
-    }
-    running.add(layer)
-    try {
-      return await runLayerSync(layer, (progress) => {
-        if (!event.sender.isDestroyed()) event.sender.send(IPC.layerSyncProgress, progress)
-      })
-    } catch (error) {
-      return failedResult(layer, messageOf(error))
-    } finally {
-      running.delete(layer)
-      // El espejo pudo cambiar: el punto de la pestaña se recalcula al toque.
-      pokeFreshness()
-    }
-  })
-
-  // ── Bronze: esquema y tabla de eventos (drill-in por día) ────
-
-  ipcMain.handle(IPC.schemaGet, async (): Promise<SchemaInfo> => {
-    try {
-      return await getSchema()
-    } catch (error) {
-      return { versions: [], messageName: null, columns: [], sources: [], error: messageOf(error) }
-    }
-  })
-
-  ipcMain.handle(IPC.eventsQuery, async (_event, request: EventsQuery): Promise<EventsPage> => {
-    try {
-      return await getEvents(request)
-    } catch (error) {
-      return {
-        rows: [],
-        total: 0,
-        limit: request.limit,
-        offset: request.offset,
-        error: messageOf(error),
+  ipcMain.handle(
+    IPC.layerDayFiles,
+    async (_event, rawLayer: unknown, rawDay: unknown): Promise<DayFiles> => {
+      const layer = asLayer(rawLayer)
+      const day = String(rawDay ?? '')
+      try {
+        const objects = await dayObjects(layer, day)
+        const sorted = [...objects].sort((a, b) => instantOf(b) - instantOf(a))
+        return {
+          layer,
+          day,
+          files: sorted.map((object) => ({
+            name: baseName(object.key),
+            size: object.size,
+            at:
+              object.lastModified ??
+              (instantOf(object) > 0 ? new Date(instantOf(object)).toISOString() : null),
+          })),
+          bytes: objects.reduce((sum, object) => sum + object.size, 0),
+        }
+      } catch (error) {
+        return { layer, day, files: [], bytes: 0, error: messageOf(error) }
       }
-    }
+    },
+  )
+
+  ipcMain.handle(
+    IPC.sampleFile,
+    async (_event, request: FileSampleQuery): Promise<FileSample> => {
+      try {
+        return await getFileSample(request)
+      } catch (error) {
+        return { columns: [], rows: [], truncated: false, error: messageOf(error) }
+      }
+    },
+  )
+
+  // ── Status: feed del vigía ───────────────────────────────────
+
+  const statusByWebContents = new Map<WebContents, () => void>()
+
+  const stopStatus = (sender: WebContents): void => {
+    statusByWebContents.get(sender)?.()
+    statusByWebContents.delete(sender)
+  }
+
+  // UN solo oyente de 'destroyed' por ventana, para TODOS los canales. Si se
+  // agregara uno por (re)suscripción, se acumularían con cada cambio de
+  // pestaña hasta el warning de MaxListeners de Node.
+  const destroyHooked = new WeakSet<WebContents>()
+  const hookDestroy = (sender: WebContents): void => {
+    if (destroyHooked.has(sender)) return
+    destroyHooked.add(sender)
+    sender.once('destroyed', () => {
+      stopStatus(sender)
+      stopFreshness(sender)
+      stopIngest(sender)
+      stopLive(sender)
+    })
+  }
+
+  ipcMain.handle(IPC.statusSubscribe, (event): void => {
+    const sender = event.sender
+    stopStatus(sender)
+    const unsubscribe = subscribeStatus((snapshot) => {
+      if (!sender.isDestroyed()) sender.send(IPC.statusSnapshot, snapshot)
+    })
+    statusByWebContents.set(sender, unsubscribe)
+    hookDestroy(sender)
   })
 
-  ipcMain.handle(IPC.rawQuery, async (_event, request: EventsQuery): Promise<EventsPage> => {
-    try {
-      return await getRawEvents(request)
-    } catch (error) {
-      return {
-        rows: [],
-        total: 0,
-        limit: request.limit,
-        offset: request.offset,
-        error: messageOf(error),
-      }
-    }
+  ipcMain.handle(IPC.statusUnsubscribe, (event): void => {
+    stopStatus(event.sender)
+  })
+
+  // ── Frescura de las capas ────────────────────────────────────
+
+  const freshnessByWebContents = new Map<WebContents, () => void>()
+
+  const stopFreshness = (sender: WebContents): void => {
+    freshnessByWebContents.get(sender)?.()
+    freshnessByWebContents.delete(sender)
+  }
+
+  ipcMain.handle(IPC.freshnessSubscribe, (event): void => {
+    const sender = event.sender
+    stopFreshness(sender)
+    const unsubscribe = subscribeFreshness((snapshot) => {
+      if (!sender.isDestroyed()) sender.send(IPC.freshnessSnapshot, snapshot)
+    })
+    freshnessByWebContents.set(sender, unsubscribe)
+    hookDestroy(sender)
+  })
+
+  ipcMain.handle(IPC.freshnessUnsubscribe, (event): void => {
+    stopFreshness(event.sender)
   })
 
   // ── Semáforo del ingestor ────────────────────────────────────
@@ -143,57 +177,11 @@ export function registerIpc(): void {
       if (!sender.isDestroyed()) sender.send(IPC.ingestStatus, status)
     })
     ingestByWebContents.set(sender, unsubscribe)
-    sender.once('destroyed', () => stopIngest(sender))
+    hookDestroy(sender)
   })
 
   ipcMain.handle(IPC.ingestUnsubscribe, (event): void => {
     stopIngest(event.sender)
-  })
-
-  // ── Frescura de las capas (contra la caché local) ────────────
-
-  const freshnessByWebContents = new Map<WebContents, () => void>()
-
-  const stopFreshness = (sender: WebContents): void => {
-    freshnessByWebContents.get(sender)?.()
-    freshnessByWebContents.delete(sender)
-  }
-
-  ipcMain.handle(IPC.freshnessSubscribe, (event): void => {
-    const sender = event.sender
-    stopFreshness(sender)
-    const unsubscribe = subscribeFreshness((snapshot) => {
-      if (!sender.isDestroyed()) sender.send(IPC.freshnessSnapshot, snapshot)
-    })
-    freshnessByWebContents.set(sender, unsubscribe)
-    sender.once('destroyed', () => stopFreshness(sender))
-  })
-
-  ipcMain.handle(IPC.freshnessUnsubscribe, (event): void => {
-    stopFreshness(event.sender)
-  })
-
-  // ── Status: feed del pipeline por suscripción a Firestore ────
-
-  const statusByWebContents = new Map<WebContents, () => void>()
-
-  const stopStatus = (sender: WebContents): void => {
-    statusByWebContents.get(sender)?.()
-    statusByWebContents.delete(sender)
-  }
-
-  ipcMain.handle(IPC.statusSubscribe, (event): void => {
-    const sender = event.sender
-    stopStatus(sender)
-    const unsubscribe = subscribeStatus((snapshot) => {
-      if (!sender.isDestroyed()) sender.send(IPC.statusSnapshot, snapshot)
-    })
-    statusByWebContents.set(sender, unsubscribe)
-    sender.once('destroyed', () => stopStatus(sender))
-  })
-
-  ipcMain.handle(IPC.statusUnsubscribe, (event): void => {
-    stopStatus(event.sender)
   })
 
   // ── Facturación ──────────────────────────────────────────────
@@ -201,6 +189,13 @@ export function registerIpc(): void {
   ipcMain.handle(IPC.billingGet, async (_event, refresh: unknown): Promise<BillingSummary> => {
     return getBilling(refresh === true)
   })
+
+  ipcMain.handle(
+    IPC.firebaseUsageGet,
+    async (_event, refresh: unknown): Promise<FirebaseUsage> => {
+      return getFirebaseUsage(refresh === true)
+    },
+  )
 
   // ── Catálogo y preferencias (los usa Vivo) ───────────────────
 
@@ -250,7 +245,7 @@ export function registerIpc(): void {
       if (!sender.isDestroyed()) sender.send(IPC.liveSnapshot, snapshot)
     })
     liveByWebContents.set(sender, unsubscribe)
-    sender.once('destroyed', () => stopLive(sender))
+    hookDestroy(sender)
   })
 
   ipcMain.handle(IPC.liveUnsubscribe, (event): void => {

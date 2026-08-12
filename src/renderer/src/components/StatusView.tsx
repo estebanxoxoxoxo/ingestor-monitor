@@ -1,27 +1,55 @@
 import { LAYERS } from '@shared/config'
-import type { IngestStatus, PipelineLogEntry, StatusSnapshot } from '@shared/types'
+import type { IngestStatus, StatusSnapshot } from '@shared/types'
 import { formatBytes, formatUtcInstant, formatUtcTime } from '../lib/format'
 import { useBilling } from '../hooks/useBilling'
+import { useFirebaseUsage } from '../hooks/useFirebaseUsage'
 
-/** 'YYYY-MM-DD HH:MM:SS UTC' — el feed merece segundos. */
-const toSeconds = (iso: string | null): string =>
-  iso ? `${iso.slice(0, 10)} ${iso.slice(11, 19)} UTC` : '—'
+const cantidad = (value: number | null): string =>
+  value === null ? '—' : value.toLocaleString('es-AR')
+
+const tamano = (value: number | null): string => (value === null ? '—' : formatBytes(value))
+
+/**
+ * La capa gratuita contra la que se mide cada métrica, en SUS unidades y
+ * ventanas (pricing 2026): Firestore Standard 50k lecturas / 20k escrituras
+ * / 20k borrados POR DÍA, 1 GiB almacenado total y 10 GiB de egreso POR
+ * MES; RTDB 10 GB de bajada POR MES, 100 conexiones simultáneas y 1 GB
+ * almacenado.
+ */
+const FREE_TIER = {
+  reads: 50_000,
+  writes: 20_000,
+  deletes: 20_000,
+  firestoreStorageBytes: 1024 ** 3, // 1 GiB
+  rtdbDownloadedBytes: 10 * 1_000_000_000, // 10 GB/mes
+  rtdbConnections: 100,
+  rtdbStorageBytes: 1_000_000_000, // 1 GB
+} as const
+
+/** El % de la capa gratuita: amarillo si pasa de 75, rojo si pasa de 90. */
+function Porcentaje({ value, limit }: { value: number | null; limit: number }) {
+  if (value === null) return null
+  const pct = (value / limit) * 100
+  const color = pct > 90 ? 'var(--error)' : pct > 75 ? '#eab308' : undefined
+  const text = pct < 10 ? pct.toFixed(1).replace('.', ',') : String(Math.round(pct))
+  return <span style={color ? { color, fontWeight: 600 } : undefined}> ({text}%)</span>
+}
 
 interface Props {
   /** El semáforo del ingestor. La suscripción vive en App. */
   ingest: IngestStatus | null
-  /** El snapshot del vigía (feed + contadores). La suscripción vive en App. */
+  /** El snapshot del vigía (contadores y avisos). La suscripción vive en App. */
   snapshot: StatusSnapshot | null
 }
 
 /**
- * El tablero de guardia: el semáforo del ingestor y la facturación del mes
- * arriba y, abajo, el log del pipeline — un renglón por parquet que aterrizó
- * en el bucket, discriminando raw de bronze. El feed llega por suscripción a
- * Firestore: lo que se ve está pasando, y dos máquinas ven lo mismo.
+ * El tablero de guardia: el semáforo del ingestor, la facturación AWS del
+ * mes y el uso de Firebase (Firestore + RTDB, vía Cloud Monitoring). El log
+ * de ingestados vive en la pestaña de cada capa.
  */
 export function StatusView({ ingest, snapshot }: Props) {
   const { summary, loading, refresh } = useBilling()
+  const firebase = useFirebaseUsage()
 
   return (
     <main className="workspace ops-view">
@@ -63,8 +91,12 @@ export function StatusView({ ingest, snapshot }: Props) {
             <p className="billing-window">
               {summary &&
                 `Costo acumulado desde el ${summary.from} hasta hoy (${summary.to}, UTC)`}
-              {summary?.fetchedAt && ` · consultado ${formatUtcInstant(summary.fetchedAt)}`}
             </p>
+            {summary?.fetchedAt && (
+              <p className="billing-window">
+                Actualizado: {formatUtcInstant(summary.fetchedAt)}
+              </p>
+            )}
           </div>
           <button className="sync-button" onClick={refresh} disabled={loading}>
             {loading ? 'Consultando…' : 'Actualizar (US$ 0,01)'}
@@ -95,6 +127,108 @@ export function StatusView({ ingest, snapshot }: Props) {
         )}
       </section>
 
+      {/* ── Uso de Firebase ─────────────────────────────────── */}
+      <section className="ops-panel">
+        <div className="billing-head">
+          <div>
+            <h2 className="ops-title">Firebase · uso de hoy (UTC)</h2>
+            {firebase.usage?.fetchedAt && (
+              <p className="billing-window">
+                Actualizado: {formatUtcInstant(firebase.usage.fetchedAt)}
+              </p>
+            )}
+          </div>
+          <button
+            className="sync-button"
+            onClick={firebase.refresh}
+            disabled={firebase.loading}
+          >
+            {firebase.loading ? 'Consultando…' : 'Actualizar'}
+          </button>
+        </div>
+
+        {firebase.usage?.error && (
+          <p className="workspace-warning">{firebase.usage.error}</p>
+        )}
+
+        {firebase.usage && (
+          <table className="ops-table striped">
+            <thead>
+              <tr>
+                <th>Métrica</th>
+                <th className="ops-num">Valor</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Firestore · lecturas hoy</td>
+                <td className="ops-num" title="Gratis: 50.000 por día">
+                  {cantidad(firebase.usage.reads)}
+                  <Porcentaje value={firebase.usage.reads} limit={FREE_TIER.reads} />
+                </td>
+              </tr>
+              <tr>
+                <td>Firestore · escrituras hoy</td>
+                <td className="ops-num" title="Gratis: 20.000 por día">
+                  {cantidad(firebase.usage.writes)}
+                  <Porcentaje value={firebase.usage.writes} limit={FREE_TIER.writes} />
+                </td>
+              </tr>
+              <tr>
+                <td>Firestore · borrados hoy</td>
+                <td className="ops-num" title="Gratis: 20.000 por día">
+                  {cantidad(firebase.usage.deletes)}
+                  <Porcentaje value={firebase.usage.deletes} limit={FREE_TIER.deletes} />
+                </td>
+              </tr>
+              <tr>
+                <td>Firestore · almacenado</td>
+                <td className="ops-num" title="Documentos + índices. Gratis: 1 GiB total">
+                  {tamano(firebase.usage.firestoreStorageBytes)}
+                  <Porcentaje
+                    value={firebase.usage.firestoreStorageBytes}
+                    limit={FREE_TIER.firestoreStorageBytes}
+                  />
+                </td>
+              </tr>
+              <tr>
+                <td>Realtime DB · bajado del mes</td>
+                <td className="ops-num" title="Gratis: 10 GB por mes">
+                  {tamano(firebase.usage.rtdbDownloadedBytes)}
+                  <Porcentaje
+                    value={firebase.usage.rtdbDownloadedBytes}
+                    limit={FREE_TIER.rtdbDownloadedBytes}
+                  />
+                </td>
+              </tr>
+              <tr>
+                <td>Realtime DB · conexiones ahora</td>
+                <td
+                  className="ops-num"
+                  title="Incluye la conexión de esta app (Vivo mantiene su propio websocket). Gratis: 100 simultáneas"
+                >
+                  {cantidad(firebase.usage.rtdbActiveConnections)}
+                  <Porcentaje
+                    value={firebase.usage.rtdbActiveConnections}
+                    limit={FREE_TIER.rtdbConnections}
+                  />
+                </td>
+              </tr>
+              <tr>
+                <td>Realtime DB · almacenado</td>
+                <td className="ops-num" title="Gratis: 1 GB">
+                  {tamano(firebase.usage.rtdbStorageBytes)}
+                  <Porcentaje
+                    value={firebase.usage.rtdbStorageBytes}
+                    limit={FREE_TIER.rtdbStorageBytes}
+                  />
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        )}
+      </section>
+
       {/* ── Avisos del vigía ────────────────────────────────── */}
       {snapshot &&
         LAYERS.map((layer) => {
@@ -110,41 +244,6 @@ export function StatusView({ ingest, snapshot }: Props) {
           )
         })}
 
-      {/* ── El log del pipeline ─────────────────────────────── */}
-      <section className="ops-panel">
-        <h2 className="ops-title">Ingestado · log</h2>
-        {snapshot && snapshot.entries.length > 0 ? (
-          <table className="ops-table striped">
-            <thead>
-              <tr>
-                <th>Subido a S3</th>
-                <th>Capa</th>
-                <th>Archivo</th>
-                <th>Tamaño</th>
-              </tr>
-            </thead>
-            <tbody>
-              {snapshot.entries.map((entry: PipelineLogEntry) => (
-                <tr key={entry.id}>
-                  <td>{toSeconds(entry.lastModified)}</td>
-                  <td>
-                    <span className={`layer-badge ${entry.layer}`}>{entry.layer}</span>
-                  </td>
-                  <td className="ops-file" title={entry.key}>
-                    {entry.file}
-                  </td>
-                  <td>{formatBytes(entry.size)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        ) : (
-          <p className="ops-empty">
-            Sin batches hoy (UTC). El vigía lista el bucket cada minuto; lo anterior se mira
-            en los espejos de Raw y Bronze.
-          </p>
-        )}
-      </section>
     </main>
   )
 }

@@ -1,10 +1,10 @@
 import { useState } from 'react'
 import type { LayerId } from '@shared/config'
-import type { SyncProgress, SyncResult } from '@shared/types'
-import { formatBytes, formatUtcInstant } from '../lib/format'
-import { useLayerSync } from '../hooks/useLayerSync'
-import { DayEventsView } from './DayEventsView'
-import { RawDayView } from './RawDayView'
+import type { DayFileEntry, PipelineLogEntry } from '@shared/types'
+import { formatBytes, formatUtcStamp } from '../lib/format'
+import { useLayerIndex } from '../hooks/useLayerIndex'
+import { DayView } from './DayView'
+import { FileView } from './FileView'
 
 interface Props {
   layer: LayerId
@@ -12,31 +12,49 @@ interface Props {
   title: string
 }
 
+interface ViewerTarget {
+  day: string
+  file: DayFileEntry
+}
+
 /**
- * Una capa del bucket: su espejo local, el botón de sync y el inventario por
- * partición diaria. El filesystem es el inventario — lo que se lista acá es
- * lo que hay en disco, no una promesa.
- *
- * Un click en un día abre su contenido: en Bronze, los eventos con las
- * columnas del contrato declarado; en Raw, las requests crudas con el
- * payload completo en popup.
+ * Una capa del bucket, SIN nada local: el índice vive en Firestore — lo
+ * alimenta la Lambda de las notificaciones de S3. Arriba, el log con los
+ * últimos archivos que aterrizaron (sin ventana) y su vista previa; abajo,
+ * el árbol de días. El botón es el Full sync: la curación manual.
  */
 export function LayerView({ layer, title }: Props) {
-  const { state, progress, result, busy, sync } = useLayerSync(layer)
+  const { state, busy, relist } = useLayerIndex(layer)
   const [day, setDay] = useState<string | null>(null)
+  const [viewer, setViewer] = useState<ViewerTarget | null>(null)
+  const [filter, setFilter] = useState('')
 
-  // El drill-in usa el layout de tabla a pantalla completa, sin el padding
-  // del inventario: la tabla virtualizada necesita su alto.
-  if (day) {
+  if (viewer) {
     return (
-      <main className="workspace">
-        {layer === 'bronze' ? (
-          <DayEventsView day={day} onBack={() => setDay(null)} />
-        ) : (
-          <RawDayView day={day} onBack={() => setDay(null)} />
-        )}
-      </main>
+      <FileView
+        layer={layer}
+        day={viewer.day}
+        file={viewer.file}
+        onBack={() => setViewer(null)}
+      />
     )
+  }
+  if (day) {
+    return <DayView layer={layer} day={day} onBack={() => setDay(null)} />
+  }
+
+  const needle = filter.trim()
+  const days = (state?.days ?? []).filter((entry) => !needle || entry.date.includes(needle))
+  const entries = state?.latest ?? []
+
+  /** Ver del log → el viewer de ese archivo (el día sale de la key). */
+  const abrir = (entry: PipelineLogEntry): void => {
+    const dia = entry.key.match(/dt=(\d{4}-\d{2}-\d{2})\//)?.[1]
+    if (!dia) return
+    setViewer({
+      day: dia,
+      file: { name: entry.file, size: entry.size, at: entry.lastModified },
+    })
   }
 
   return (
@@ -46,27 +64,81 @@ export function LayerView({ layer, title }: Props) {
           <strong>{state ? state.files : '—'}</strong> archivos ·{' '}
           {state ? formatBytes(state.bytes) : '—'}
         </span>
-        <span className="workspace-schema">
-          última sync: {state?.lastSyncAt ? formatUtcInstant(state.lastSyncAt) : 'nunca'}
-        </span>
-        <button className="sync-button" onClick={() => void sync()} disabled={busy}>
+        <button
+          className="sync-button"
+          onClick={() => void relist()}
+          disabled={busy}
+          title="Relista TODO el bucket y reconcilia el índice en Firestore"
+        >
           <span className={busy ? 'sync-icon spinning' : 'sync-icon'} aria-hidden="true">
             ⟳
           </span>
-          {busy ? 'Sincronizando…' : `${title} sync`}
+          {busy ? 'Sincronizando…' : 'Full sync'}
         </button>
       </div>
 
       {state?.error && <p className="workspace-warning">{state.error}</p>}
 
-      <SyncFeedback progress={progress} result={result} busy={busy} />
-
+      {/* ── El log: los últimos archivos, sin ventana ────────── */}
       <section className="ops-panel">
-        <h2 className="ops-title">
-          Inventario por día (UTC) · click en un día para ver su contenido
-        </h2>
-        {state && state.days.length > 0 ? (
-          <table className="ops-table">
+        <h2 className="ops-title">Ingestado · log</h2>
+        {entries.length > 0 ? (
+          <table className="ops-table striped">
+            <thead>
+              <tr>
+                <th>Subido</th>
+                <th>Capa</th>
+                <th>Archivo</th>
+                <th>Tamaño</th>
+                <th className="ops-num" aria-label="vista previa" />
+              </tr>
+            </thead>
+            <tbody>
+              {entries.map((entry) => (
+                <tr key={entry.id}>
+                  <td>{entry.lastModified ? formatUtcStamp(entry.lastModified) : '—'}</td>
+                  <td>
+                    <span className={`layer-badge ${entry.layer}`}>{entry.layer}</span>
+                  </td>
+                  <td className="ops-file" title={entry.key}>
+                    {entry.file}
+                  </td>
+                  <td>{formatBytes(entry.size)}</td>
+                  <td className="ops-num">
+                    <button
+                      className="ver-btn"
+                      title="Abrir la vista previa del archivo"
+                      onClick={() => abrir(entry)}
+                    >
+                      Ver
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <p className="ops-empty">Todavía no hay archivos de {title.toLowerCase()} en el índice.</p>
+        )}
+      </section>
+
+      {/* ── El árbol: días → archivos → viewer ───────────────── */}
+      <section className="ops-panel">
+        <div className="ops-panel-head">
+          <h2 className="ops-title">
+            Días en el bucket (UTC) · click en un día para ver sus archivos
+          </h2>
+          <input
+            className="ops-filter"
+            type="search"
+            placeholder="Buscar día… (2026-08)"
+            value={filter}
+            onChange={(event) => setFilter(event.target.value)}
+          />
+        </div>
+
+        {days.length > 0 ? (
+          <table className="ops-table striped">
             <thead>
               <tr>
                 <th>Día</th>
@@ -75,15 +147,11 @@ export function LayerView({ layer, title }: Props) {
               </tr>
             </thead>
             <tbody>
-              {state.days.map((entry) => (
+              {days.map((entry) => (
                 <tr
                   key={entry.date}
                   className="ops-row-click"
-                  title={
-                    layer === 'bronze'
-                      ? 'Ver todos los eventos del día'
-                      : 'Ver las requests crudas del día'
-                  }
+                  title="Ver los archivos del día"
                   onClick={() => setDay(entry.date)}
                 >
                   <td>{entry.date}</td>
@@ -95,62 +163,14 @@ export function LayerView({ layer, title }: Props) {
           </table>
         ) : (
           <p className="ops-empty">
-            El espejo local está vacío: corré «{title} sync» para traer la capa del bucket.
+            {state === null || !state.listedAt
+              ? 'Cargando el índice…'
+              : needle
+                ? `Ningún día contiene "${needle}".`
+                : 'La capa no tiene días en el bucket.'}
           </p>
         )}
       </section>
-
-      {state?.cacheDir && <code className="path">{state.cacheDir}</code>}
     </main>
-  )
-}
-
-/** La cara de la sync: barra de progreso mientras corre, desenlace al final. */
-function SyncFeedback({
-  progress,
-  result,
-  busy,
-}: {
-  progress: SyncProgress | null
-  result: SyncResult | null
-  busy: boolean
-}) {
-  if (busy && progress) {
-    const pct =
-      progress.bytesTotal > 0 ? Math.round((progress.bytesDone / progress.bytesTotal) * 100) : 0
-    return (
-      <div className="status">
-        <div className="progress-track">
-          <div className="progress-fill" style={{ width: `${pct}%` }} />
-        </div>
-        <span className="status-text">
-          {progress.message}
-          {progress.bytesTotal > 0 &&
-            ` · ${formatBytes(progress.bytesDone)} de ${formatBytes(progress.bytesTotal)}`}
-        </span>
-      </div>
-    )
-  }
-
-  if (!result) return null
-
-  if (result.error) {
-    return (
-      <div className="status status-error">
-        <strong>Falló la sincronización.</strong> {result.error}
-      </div>
-    )
-  }
-
-  return (
-    <div className={result.ok ? 'status status-ok' : 'status status-warn'}>
-      <span className="status-text">
-        {result.from
-          ? `${result.from} → ${result.to}: ${result.downloaded} archivos nuevos (${formatBytes(result.bytes)}), ${result.skipped} ya estaban.`
-          : 'No había nada para sincronizar.'}
-        {result.discarded > 0 && ` Se rehízo ${result.to} desde cero (${result.discarded} archivos).`}
-        {result.failures.length > 0 && ` ${result.failures.length} fallaron.`}
-      </span>
-    </div>
   )
 }
