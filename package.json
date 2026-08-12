@@ -13,7 +13,7 @@
     "test:watch": "vitest",
     "dist": "npm run build && electron-builder",
     "infra:index": "bash infra/scripts/deploy-lake-index.sh",
-    "infra:vector": "bash infra/scripts/deploy-vector-config.sh",
+    "infra:connect": "bash infra/scripts/deploy-connect-config.sh",
     "infra:caddy": "bash infra/scripts/deploy-caddy-config.sh"
   },
   "dependencies": {
