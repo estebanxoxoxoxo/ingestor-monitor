@@ -9,7 +9,7 @@ function createWindow(): void {
     minWidth: 1024,
     minHeight: 640,
     show: false,
-    title: 'Data Analizer Ops',
+    title: 'Ingestor Monitor',
     backgroundColor: '#0d1117',
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -19,7 +19,12 @@ function createWindow(): void {
     },
   })
 
-  window.once('ready-to-show', () => window.show())
+  // La app abre a pantalla completa (ventana maximizada). Maximizar antes
+  // de mostrar evita el parpadeo de la ventana chica.
+  window.once('ready-to-show', () => {
+    window.maximize()
+    window.show()
+  })
 
   // Los links externos van al navegador del sistema, no a una ventana Electron.
   window.webContents.setWindowOpenHandler(({ url }) => {

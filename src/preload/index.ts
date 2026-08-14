@@ -4,12 +4,12 @@ import { IPC } from '@shared/config'
 import type { LayerId } from '@shared/config'
 import type {
   AppSettings,
-  BillingSummary,
   DayFiles,
   EventCatalog,
   FileSample,
   FileSampleQuery,
   FirebaseUsage,
+  GcpUsage,
   FreshnessSnapshot,
   IngestStatus,
   LayerState,
@@ -78,11 +78,15 @@ const api: RendererApi = {
     }
   },
 
-  getBilling: (refresh: boolean): Promise<BillingSummary> =>
-    ipcRenderer.invoke(IPC.billingGet, refresh),
-
   getFirebaseUsage: (refresh: boolean): Promise<FirebaseUsage> =>
     ipcRenderer.invoke(IPC.firebaseUsageGet, refresh),
+
+  getGcpUsage: (refresh: boolean): Promise<GcpUsage> =>
+    ipcRenderer.invoke(IPC.gcpUsageGet, refresh),
+
+  openBillingReport: (): Promise<void> => ipcRenderer.invoke(IPC.billingReportOpen),
+
+  openFirebaseUsage: (): Promise<void> => ipcRenderer.invoke(IPC.firebaseConsoleOpen),
 
   subscribeLive: (callback: (snapshot: LiveSnapshot) => void): (() => void) => {
     const listener = (_event: IpcRendererEvent, snapshot: LiveSnapshot): void => callback(snapshot)

@@ -27,6 +27,15 @@ export const INVENTORY_COLLECTION = 'inventory'
 /** Nodo de la Realtime Database con las sesiones abiertas. */
 export const LIVE_SESSIONS_PATH = 'activeSessions'
 
+/**
+ * La cuenta de facturación que paga TODOS los proyectos. No es secreto:
+ * identifica el informe de la consola que el botón de Status abre en el
+ * navegador (embeberlo es imposible: Google prohíbe sus páginas en
+ * iframes y su login no corre embebido).
+ */
+export const BILLING_ACCOUNT_ID = '01BF36-37A196-9E508D'
+export const BILLING_REPORT_URL = `https://console.cloud.google.com/billing/${BILLING_ACCOUNT_ID}/reports`
+
 /** Las dos capas del bucket que Ops navega y vigila. */
 export type LayerId = 'raw' | 'bronze'
 export const LAYERS: LayerId[] = ['raw', 'bronze']
@@ -82,6 +91,8 @@ export const IPC = {
   ingestSubscribe: 'ingest:subscribe',
   ingestUnsubscribe: 'ingest:unsubscribe',
   ingestStatus: 'ingest:status',
-  billingGet: 'billing:get',
   firebaseUsageGet: 'firebase:usage',
+  gcpUsageGet: 'gcp:usage',
+  billingReportOpen: 'billing-report:open',
+  firebaseConsoleOpen: 'firebase-console:open',
 } as const

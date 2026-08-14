@@ -14,7 +14,7 @@ interface Props {
 /**
  * Los ARCHIVOS de un día, del índice (Firestore/vigía): nombres, pesos y
  * fechas — acá no se toca data. Click en un nombre → el viewer de ese
- * archivo, pedido a S3 al momento.
+ * archivo, pedido al lake al momento.
  */
 export function DayView({ layer, day, onBack }: Props) {
   const data = useDayFiles(layer, day)

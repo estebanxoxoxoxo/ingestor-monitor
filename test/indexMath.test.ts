@@ -6,8 +6,8 @@ import {
   inRolloverGrace,
   instantOf,
   previousDay,
-} from '../src/main/inventory/indexMath'
-import type { RemoteObject } from '../src/main/s3/s3'
+} from '../src/main/ingest-monitor/indexMath'
+import type { RemoteObject } from '../src/main/lake'
 
 /**
  * La aritmética del índice en Firestore: el diff que decide qué se escribe

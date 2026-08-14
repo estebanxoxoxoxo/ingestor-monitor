@@ -10,9 +10,9 @@ import type {
 } from '@shared/types'
 import { loadEnv } from '../env'
 import type { AppEnv } from '../env'
-import { createS3Client, dayPrefix, layerPrefix, listPrefix } from '../s3/s3'
-import type { RemoteObject } from '../s3/s3'
-import { classify } from '../status/layerFreshness'
+import { dayPrefix, layerPrefix, listPrefix } from '../lake'
+import type { RemoteObject } from '../lake'
+import { classify } from './layerFreshness'
 import {
   aggregateDay,
   applyDayWrites,
@@ -282,7 +282,7 @@ async function fullReconcile(id: LayerId): Promise<void> {
   const st = index[id]
   const hoy = todayUtc()
   const scanStartMs = Date.now()
-  const objects = await listPrefix(createS3Client(env), env, layerPrefix(env, id))
+  const objects = await listPrefix(env, layerPrefix(env, id))
   const byDay = groupByDate(objects)
 
   let markers: IsoDate[] = []

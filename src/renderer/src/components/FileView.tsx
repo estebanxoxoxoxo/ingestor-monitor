@@ -37,7 +37,7 @@ function jsonOf(value: unknown): unknown | null {
 
 
 /**
- * El viewer de UN archivo: su contenido leído de S3 al momento, volátil.
+ * El viewer de UN archivo: su contenido leído del lake al momento, volátil.
  *
  * En bronze la tabla ya trae TODAS las columnas del parquet, así que no hay
  * botón Ver: las celdas que son JSON muestran su resumen y abren el visor
@@ -84,7 +84,7 @@ export function FileView({ layer, day, file, onBack }: Props) {
         </span>
         <span className="workspace-schema">
           {esRaw
-            ? 'raw: cada POST tal cual llegó — leído directo de S3, volátil'
+            ? 'raw: cada POST tal cual llegó — leído directo del lake, volátil'
             : 'bronze: los eventos del parquet — click en una celda JSON para verla'}
         </span>
       </div>
@@ -149,7 +149,7 @@ export function FileView({ layer, day, file, onBack }: Props) {
           </div>
         ) : (
           <p className="ops-empty">
-            {sample === null ? 'Pidiendo el archivo a S3…' : 'El archivo no tiene filas.'}
+            {sample === null ? 'Pidiendo el archivo al lake…' : 'El archivo no tiene filas.'}
           </p>
         )}
       </section>

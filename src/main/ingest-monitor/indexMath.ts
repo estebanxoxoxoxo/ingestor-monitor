@@ -1,5 +1,5 @@
 import type { IsoDate } from '@shared/date'
-import type { RemoteObject } from '../s3/s3'
+import type { RemoteObject } from '../lake'
 
 /**
  * La aritmética pura del índice: días, diffs y resúmenes. Sin S3 y sin

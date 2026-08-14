@@ -19,12 +19,12 @@ interface ViewerTarget {
 
 /**
  * Una capa del bucket, SIN nada local: el índice vive en Firestore — lo
- * alimenta la Lambda de las notificaciones de S3. Arriba, el log con los
+ * alimenta la función de las notificaciones del lake. Arriba, el log con los
  * últimos archivos que aterrizaron (sin ventana) y su vista previa; abajo,
- * el árbol de días. El botón es el Full sync: la curación manual.
+ * el árbol de días. El Full sync (la curación manual) vive en Config.
  */
 export function LayerView({ layer, title }: Props) {
-  const { state, busy, relist } = useLayerIndex(layer)
+  const { state } = useLayerIndex(layer)
   const [day, setDay] = useState<string | null>(null)
   const [viewer, setViewer] = useState<ViewerTarget | null>(null)
   const [filter, setFilter] = useState('')
@@ -64,17 +64,6 @@ export function LayerView({ layer, title }: Props) {
           <strong>{state ? state.files : '—'}</strong> archivos ·{' '}
           {state ? formatBytes(state.bytes) : '—'}
         </span>
-        <button
-          className="sync-button"
-          onClick={() => void relist()}
-          disabled={busy}
-          title="Relista TODO el bucket y reconcilia el índice en Firestore"
-        >
-          <span className={busy ? 'sync-icon spinning' : 'sync-icon'} aria-hidden="true">
-            ⟳
-          </span>
-          {busy ? 'Sincronizando…' : 'Full sync'}
-        </button>
       </div>
 
       {state?.error && <p className="workspace-warning">{state.error}</p>}

@@ -6,7 +6,7 @@ import type { View } from '../App'
 interface Props {
   view: View
   onView: (view: View) => void
-  /** El semáforo del ingestor: pinta el punto de la pestaña Status. */
+  /** El semáforo del ingestor: pinta el punto de la pestaña Config. */
   ingest: IngestStatus | null
   /** Batches que aterrizaron HOY (UTC) por capa. */
   today: Record<LayerId, number | null> | null
@@ -19,7 +19,7 @@ const VIEWS: { id: View; label: string; live?: boolean; layer?: LayerId }[] = [
   { id: 'vivo', label: 'Vivo', live: true },
   { id: 'raw', label: 'Raw', layer: 'raw' },
   { id: 'bronze', label: 'Bronze', layer: 'bronze' },
-  { id: 'status', label: 'Status' },
+  { id: 'config', label: 'Config' },
 ]
 
 /** Tooltip del punto de una capa: qué edad tiene el dato más nuevo local. */
@@ -40,7 +40,7 @@ export function TopBar({ view, onView, ingest, today, freshness }: Props) {
   return (
     <header className="topbar">
       <div className="topbar-left">
-        <h1>Data Analizer Ops</h1>
+        <h1>Ingestor Monitor</h1>
         <span className="badge" title="Todo el análisis es en UTC, sin conversión de husos">
           UTC
         </span>
@@ -52,7 +52,7 @@ export function TopBar({ view, onView, ingest, today, freshness }: Props) {
               className={item.id === view ? 'view-tab active' : 'view-tab'}
               onClick={() => onView(item.id)}
               title={
-                item.id === 'status'
+                item.id === 'config'
                   ? ingestHint
                   : item.layer
                     ? freshHint(freshness?.[item.layer])
@@ -66,7 +66,7 @@ export function TopBar({ view, onView, ingest, today, freshness }: Props) {
                   aria-hidden="true"
                 />
               )}
-              {item.id === 'status' && (
+              {item.id === 'config' && (
                 <span className={`ingest-dot ${ingestState}`} aria-hidden="true" />
               )}
               {item.label}

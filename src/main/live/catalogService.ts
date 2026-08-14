@@ -1,13 +1,13 @@
 import type { EventCatalog, EventDefinition } from '@shared/types'
 import { loadEnv } from '../env'
-import { createS3Client, getObjectText, listPrefix } from '../s3/s3'
-import { declaredEventsOf } from '../schema/registry'
-import type { DeclaredEvents } from '../schema/registry'
+import { getObjectText } from '../lake'
+import { declaredEventsOf } from './registry'
+import type { DeclaredEvents } from './registry'
 import { readSettings, writeEventCatalog } from './settingsService'
 
 /**
  * Las cuatro cosas que el catálogo necesita del mundo exterior. Se inyectan
- * para poder probar la precedencia sin un .env, sin S3 y sin Firestore.
+ * para poder probar la precedencia sin un .env, sin el lake y sin Firestore.
  */
 export interface CatalogDeps {
   readDeclared: () => Promise<DeclaredEvents | null>
@@ -17,34 +17,29 @@ export interface CatalogDeps {
 }
 
 /**
- * El registro se lee DIRECTO de S3, en memoria (nada local), y se cachea la
- * corrida entera: los contratos cambian con un publish, no por minuto —
- * reabrir la app los relee.
+ * El catálogo declarado es `schemas/event-types.json` del lake: lo publica
+ * la suite desde sus propios enums (behavior + business) con
+ * `npm run publish:event-types` en el repo de la landing. Se lee DIRECTO
+ * del lake, en memoria, y se cachea la corrida entera: los contratos
+ * cambian con un publish, no por minuto — reabrir la app los relee.
  */
 let declaredCache: DeclaredEvents | null | undefined
 
-async function declaredFromS3(): Promise<DeclaredEvents | null> {
+async function declaredFromLake(): Promise<DeclaredEvents | null> {
   if (declaredCache !== undefined) return declaredCache
   const env = loadEnv()
-  const client = createS3Client(env)
-  const objects = await listPrefix(client, env, env.s3.schemaPrefix)
-  const catalogs = objects.filter((o) => /\/events_v[^/]+\.json$/.test(o.key))
-
-  const parsed: unknown[] = []
-  for (const object of catalogs) {
-    try {
-      parsed.push(JSON.parse(await getObjectText(client, env, object.key)))
-    } catch {
-      // Un archivo ilegible no voltea el catálogo de las demás versiones.
-    }
+  try {
+    const text = await getObjectText(env, `${env.lake.schemaPrefix}event-types.json`)
+    declaredCache = declaredEventsOf([JSON.parse(text)])
+  } catch {
+    // Sin catálogo publicado (o ilegible): se cae a lo guardado en Firestore.
+    declaredCache = null
   }
-
-  declaredCache = declaredEventsOf(parsed)
   return declaredCache
 }
 
 const defaultDeps = (): CatalogDeps => ({
-  readDeclared: declaredFromS3,
+  readDeclared: declaredFromLake,
   // Acá no se consulta la data de bronze: sin catálogo declarado en el
   // registro, se cae directo a lo último guardado en Firestore.
   namesFromCache: async () => [],
@@ -55,8 +50,8 @@ const defaultDeps = (): CatalogDeps => ({
 /**
  * Qué eventos existen.
  *
- * 1. El catálogo DECLARADO en el registro (S3), que es la única fuente que
- *    puede responder "qué eventos son posibles". Si está, manda y nada más.
+ * 1. El catálogo DECLARADO en el registro (el lake), que es la única fuente
+ *    que puede responder "qué eventos son posibles". Si está, manda.
  * 2. `namesFromCache` queda como paso inyectable para pruebas; en esta app
  *    no muestrea data (devuelve vacío).
  * 3. Sin declaración, lo último que se guardó en Firestore.

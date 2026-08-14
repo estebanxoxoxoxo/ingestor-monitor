@@ -1,11 +1,12 @@
 /**
- * Catálogo DECLARADO de eventos: `schemas/<versión>/events_v<versión>.json`,
- * leído DIRECTO de S3 (nada local).
+ * Catálogo DECLARADO de eventos: `schemas/event-types.json` del lake, que
+ * la suite publica desde sus enums (behavior + business) con
+ * `npm run publish:event-types` en el repo de la landing.
  *
  * Hace falta porque los datos no pueden responder la pregunta: `event` es un
  * STRING abierto y un `SELECT DISTINCT` dice qué ocurrió, nunca qué puede
- * ocurrir. La lista de eventos posibles vive en el código del SDK que los
- * emite, y este archivo es cómo ese código se la publica.
+ * ocurrir. La lista de eventos posibles vive en el código de la suite que
+ * los emite, y ese archivo es cómo el código se la publica al resto.
  *
  * Un solo formato, que es el que se publica:
  *

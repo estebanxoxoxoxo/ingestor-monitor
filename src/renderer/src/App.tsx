@@ -1,22 +1,22 @@
 import { useState } from 'react'
+import { ConfigView } from './components/ConfigView'
 import { LayerView } from './components/LayerView'
 import { LiveView } from './components/live/LiveView'
-import { StatusView } from './components/StatusView'
 import { TopBar } from './components/TopBar'
 import { useEventCatalog } from './hooks/useEventCatalog'
 import { useIngestStatus } from './hooks/useIngestStatus'
 import { useLayerFreshness } from './hooks/useLayerFreshness'
 import { useStatusFeed } from './hooks/useStatusFeed'
 
-/** vivo mira la RTDB; raw y bronze espejan el bucket; status monta guardia. */
-export type View = 'vivo' | 'raw' | 'bronze' | 'status'
+/** vivo mira la RTDB; raw y bronze espejan el bucket; config monta guardia. */
+export type View = 'vivo' | 'raw' | 'bronze' | 'config'
 
 export function App() {
   const [view, setView] = useState<View>('vivo')
   const { events: catalog, groups, declared } = useEventCatalog()
   // UNA sola suscripción por ventana a cada canal (dos se pisarían en main):
   // el semáforo y el snapshot del vigía viven acá y bajan por props — el
-  // header necesita los dos aunque no estés parado en Status.
+  // header necesita los dos aunque no estés parado en Config.
   const ingest = useIngestStatus()
   const status = useStatusFeed(true)
   const freshness = useLayerFreshness()
@@ -36,7 +36,7 @@ export function App() {
       )}
       {view === 'raw' && <LayerView layer="raw" title="Raw" />}
       {view === 'bronze' && <LayerView layer="bronze" title="Bronze" />}
-      {view === 'status' && <StatusView ingest={ingest} snapshot={status} />}
+      {view === 'config' && <ConfigView ingest={ingest} snapshot={status} />}
     </div>
   )
 }

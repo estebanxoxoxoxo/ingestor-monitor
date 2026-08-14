@@ -1,21 +1,25 @@
-import { ipcMain } from 'electron'
+import { ipcMain, shell } from 'electron'
 import type { WebContents } from 'electron'
-import { IPC } from '@shared/config'
+import { BILLING_REPORT_URL, IPC } from '@shared/config'
 import type { LayerId } from '@shared/config'
 import type {
   AppSettings,
-  BillingSummary,
   DayFiles,
   EventCatalog,
   FileSample,
   FileSampleQuery,
   FirebaseUsage,
+  GcpUsage,
   LayerState,
   SettingsResult,
 } from '@shared/types'
-import { getBilling, startBillingRefresh } from './billing/billingService'
-import { getFirebaseUsage, startFirebaseUsage } from './status/firebaseUsage'
-import { baseName, instantOf } from './inventory/indexMath'
+import { loadEnv } from './env'
+// Config: el semáforo del ingestor y las tarjetas de uso.
+import { getFirebaseUsage, startFirebaseUsage } from './config/firebaseUsage'
+import { getGcpUsage, startGcpUsage } from './config/gcpUsage'
+import { startPinger, subscribeIngest } from './config/ingestPinger'
+// Ingest monitor: el índice del lake y el viewer de archivos.
+import { baseName, instantOf } from './ingest-monitor/indexMath'
 import {
   dayObjects,
   getLayerState,
@@ -23,22 +27,22 @@ import {
   startInventory,
   subscribeFreshness,
   subscribeStatus,
-} from './inventory/inventoryService'
+} from './ingest-monitor/inventoryService'
+import { getFileSample } from './ingest-monitor/sampleService'
+// Live: las sesiones abiertas, su catálogo de eventos y sus preferencias.
+import { getEventCatalog } from './live/catalogService'
 import { getLiveEvent, subscribeLive } from './live/liveService'
-import { getFileSample } from './sample/sampleService'
-import { getEventCatalog } from './settings/catalogService'
-import { readSettings, writeSettings } from './settings/settingsService'
-import { startPinger, subscribeIngest } from './status/ingestPinger'
+import { readSettings, writeSettings } from './live/settingsService'
 
 const asLayer = (value: unknown): LayerId => (value === 'raw' ? 'raw' : 'bronze')
 
 export function registerIpc(): void {
-  // El vigía, el semáforo y la facturación arrancan con la app: se
-  // alimentan aunque nadie esté mirando.
+  // El vigía, el semáforo y los usos arrancan con la app: se alimentan
+  // aunque nadie esté mirando.
   startInventory()
   startPinger()
-  startBillingRefresh()
   startFirebaseUsage()
+  startGcpUsage()
 
   // ── Capas: índice del bucket y viewer de archivos ────────────
 
@@ -184,11 +188,7 @@ export function registerIpc(): void {
     stopIngest(event.sender)
   })
 
-  // ── Facturación ──────────────────────────────────────────────
-
-  ipcMain.handle(IPC.billingGet, async (_event, refresh: unknown): Promise<BillingSummary> => {
-    return getBilling(refresh === true)
-  })
+  // ── Uso de Firebase y de Google Cloud ────────────────────────
 
   ipcMain.handle(
     IPC.firebaseUsageGet,
@@ -196,6 +196,23 @@ export function registerIpc(): void {
       return getFirebaseUsage(refresh === true)
     },
   )
+
+  ipcMain.handle(IPC.gcpUsageGet, async (_event, refresh: unknown): Promise<GcpUsage> => {
+    return getGcpUsage(refresh === true)
+  })
+
+  // Las consolas se abren en el NAVEGADOR (logueado): Google no permite
+  // embeberlas — sus páginas rechazan iframes y su login, webviews.
+  ipcMain.handle(IPC.billingReportOpen, async (): Promise<void> => {
+    await shell.openExternal(BILLING_REPORT_URL)
+  })
+
+  ipcMain.handle(IPC.firebaseConsoleOpen, async (): Promise<void> => {
+    const projectId = loadEnv().firebase.projectId
+    await shell.openExternal(
+      `https://console.firebase.google.com/u/0/project/${projectId}/usage?hl=es-419`,
+    )
+  })
 
   // ── Catálogo y preferencias (los usa Vivo) ───────────────────
 

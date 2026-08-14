@@ -3,7 +3,7 @@ import type { LayerId } from '@shared/config'
 import type { FileSample } from '@shared/types'
 
 /**
- * El contenido de UN archivo, pedido a S3 al abrir el viewer. Volátil: vive
+ * El contenido de UN archivo, pedido al lake al abrir el viewer. Volátil: vive
  * en el estado del componente y muere con él. Un archivo ya escrito no
  * cambia, así que no hay nada que refrescar.
  */

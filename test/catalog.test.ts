@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
-import { getEventCatalog } from '../src/main/settings/catalogService'
-import type { CatalogDeps } from '../src/main/settings/catalogService'
-import type { DeclaredEvents } from '../src/main/schema/registry'
+import { getEventCatalog } from '../src/main/live/catalogService'
+import type { CatalogDeps } from '../src/main/live/catalogService'
+import type { DeclaredEvents } from '../src/main/live/registry'
 
 const DECLARADO: DeclaredEvents = {
   events: [{ name: 'cta_click', label: 'CTA click', group: 'business', values: [] }],

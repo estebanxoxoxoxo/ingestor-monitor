@@ -39,11 +39,17 @@ export interface RendererApi {
   /** Frescura de cada capa contra el bucket. Devuelve el des-suscriptor. */
   subscribeFreshness(callback: (snapshot: FreshnessSnapshot) => void): () => void
 
-  /** Facturación de la cuenta AWS. refresh=true consulta de nuevo (US$ 0,01). */
-  getBilling(refresh: boolean): Promise<BillingSummary>
-
   /** Uso de Firestore y la RTDB (Cloud Monitoring). refresh=true re-consulta. */
   getFirebaseUsage(refresh: boolean): Promise<FirebaseUsage>
+
+  /** Uso del resto de Google Cloud (GCS, VM, función, Pub/Sub). refresh=true re-consulta. */
+  getGcpUsage(refresh: boolean): Promise<GcpUsage>
+
+  /** Abre el informe de facturación de GC en el NAVEGADOR del sistema. */
+  openBillingReport(): Promise<void>
+
+  /** Abre el panel de uso de Firebase en el NAVEGADOR del sistema. */
+  openFirebaseUsage(): Promise<void>
 }
 
 /** Preferencias que se guardan en Firestore, no en la máquina. */
@@ -226,27 +232,6 @@ export interface IngestStatus {
   error?: string
 }
 
-// ── Facturación AWS ────────────────────────────────────────────
-
-export interface BillingService {
-  service: string
-  amount: number
-}
-
-export interface BillingSummary {
-  /** Ventana consultada: del 1° del mes (UTC) a hoy inclusive. */
-  from: string
-  to: string
-  /** Total del período. null si la consulta falló. */
-  total: number | null
-  currency: string
-  /** Desglose por servicio, de mayor a menor. */
-  byService: BillingService[]
-  /** Cuándo se consultó, ISO en UTC. La consulta cuesta US$ 0,01: se cachea. */
-  fetchedAt: string | null
-  error?: string
-}
-
 // ── Uso de Firebase (Cloud Monitoring) ─────────────────────────
 
 /**
@@ -274,6 +259,45 @@ export interface FirebaseUsage {
   /** RTDB: conexiones AHORA y bytes almacenados (total actual). */
   rtdbActiveConnections: number | null
   rtdbStorageBytes: number | null
+  fetchedAt: string | null
+  error?: string
+}
+
+// ── Uso de Google Cloud (Cloud Monitoring + el índice) ─────────
+
+/**
+ * El consumo del resto de la infraestructura de Google Cloud — GCS, la VM
+ * del ingestor, la función del índice, Pub/Sub y Artifact Registry — cada
+ * variable en la unidad y ventana de su capa Always Free: los contadores
+ * son del MES CALENDARIO (UTC); los almacenados, el valor actual. null =
+ * no se pudo leer o todavía no hay datos.
+ */
+export interface GcpUsage {
+  /** Ventana de los contadores: del 1° del mes (UTC) a la consulta. */
+  from: string
+  to: string
+  /**
+   * El lake (raw + bronze) según el ÍNDICE del vigía — la vista del lake
+   * que la app reconoce. El gauge diario de GCS no publica aún en el
+   * proyecto, y sería una segunda fuente.
+   */
+  lakeStorageBytes: number | null
+  /**
+   * GCS del mes: operaciones clase A (escrituras y listados) y clase B
+   * (lecturas), de todos los buckets del proyecto, errores incluidos.
+   */
+  gcsClassAOps: number | null
+  gcsClassBOps: number | null
+  /** GCS: bytes respondidos en el mes, a cualquier destino (cota superior del egreso). */
+  gcsSentBytes: number | null
+  /** VM: bytes salidos en el mes, a cualquier destino (cota superior del egreso). */
+  vmSentBytes: number | null
+  /** Función index-writer: ejecuciones del mes (una por archivo que aterriza). */
+  functionInvocations: number | null
+  /** Pub/Sub: bytes tasados del mes (publicación + entrega). */
+  pubsubBytes: number | null
+  /** Artifact Registry: las imágenes de la función, valor actual. */
+  artifactStorageBytes: number | null
   fetchedAt: string | null
   error?: string
 }

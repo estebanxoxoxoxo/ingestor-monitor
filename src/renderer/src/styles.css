@@ -805,11 +805,11 @@ body {
   gap: 16px;
 }
 
-.billing-total {
-  margin: 6px 0 0;
-  font-size: 34px;
-  font-weight: 700;
-  font-family: 'Cascadia Mono', Consolas, monospace;
+.billing-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
 }
 
 .billing-window {

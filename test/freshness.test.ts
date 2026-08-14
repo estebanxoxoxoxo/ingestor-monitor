@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { classify } from '../src/main/status/layerFreshness'
+import { classify } from '../src/main/ingest-monitor/layerFreshness'
 
 /**
  * La regla de la casa: los cortes van por DÍA UTC de calendario, nunca por

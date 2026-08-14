@@ -1,8 +1,8 @@
 {
-  "name": "session-ingest-monitor",
+  "name": "ingestor-monitor",
   "version": "0.1.0",
   "private": true,
-  "description": "Session Ingest Monitor: el viewer de escritorio del pipeline — sesiones en vivo, índice del lake en Firestore con viewer de archivos directo del bucket, y guardia del ingestor (semáforo, facturación y uso de Firebase). La transformación vive en BigQuery",
+  "description": "Ingestor Monitor: el monitor de escritorio del pipeline — sesiones en vivo, índice del lake en Firestore con viewer de archivos directo del bucket, y guardia del ingestor (semáforo y uso de Firebase/GC). La transformación vive en BigQuery",
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
@@ -17,9 +17,8 @@
     "infra:caddy": "bash infra/scripts/deploy-caddy-config.sh"
   },
   "dependencies": {
-    "@aws-sdk/client-cost-explorer": "^3.1103.0",
-    "@aws-sdk/client-s3": "^3.1103.0",
     "@firebase/app": "^0.16.0",
+    "@google-cloud/storage": "^7.22.0",
     "d3-geo": "^3.1.1",
     "d3-selection": "^3.0.0",
     "d3-transition": "^3.0.1",
