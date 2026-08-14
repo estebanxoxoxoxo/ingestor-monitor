@@ -13,7 +13,7 @@ export type IngestListener = (status: IngestStatus) => void
  *
  * Honestidad del semáforo: el probe sale de esta máquina, así que un rojo
  * también puede ser la red local caída. Y "escuchando" no garantiza que los
- * eventos lleguen a S3 — eso lo cuenta el vigía de parquets, que es la otra
+ * eventos lleguen al lake — eso lo cuenta el árbol de hoy, que es la otra
  * mitad del cuadro.
  */
 

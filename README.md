@@ -21,24 +21,25 @@ business) con `npm run publish:event-types` en el repo de la landing.
 **Raw** y **Bronze** — navegadores del lake, cada una con su punto de
 frescura (verde = data de HOY UTC; naranja = de ayer a 6 días; violeta =
 una semana o más; rojo = nunca — días de calendario, jamás ventanas
-móviles). Arriba, el **log con los últimos archivos que aterrizaron** (sin
-ventana de tiempo; hoy en vivo), con **Ver** que abre la vista previa del
-archivo. Abajo, el árbol: días con
+móviles). Arriba, el **log de lo que aterrizó hoy** (UTC, en vivo por la
+suscripción), con **Ver** que abre la vista previa del archivo. Abajo, el
+árbol para la historia: días con
 buscador → click en un día → sus **archivos** (nombre, peso y fecha) →
 click en un nombre → el **viewer de ese archivo**, bajado de GCS al
 momento a un temporal que DuckDB lee y se borra al instante — en raw una
 fila por request HTTP, en bronze una por evento, con **Ver** por registro.
 Cada click paga exactamente un objeto; las credenciales jamás viajan en
-SQL ni en la línea de comandos. El **Full sync** (la curación manual)
-vive en la pestaña Config.
+SQL ni en la línea de comandos. **Regenerate tree in DB** (el remedio
+manual) vive en la pestaña Config.
 
 **Config** — la guardia y la operación: el semáforo del ingestor (probe
 TCP cada 5 min); los accesos **GC · facturación ↗** y **Firebase · uso ↗**
 — el informe de la cuenta completa y el panel de uso del proyecto,
 abiertos EN EL NAVEGADOR con tu sesión (la consola de Google no se puede
 embeber: sus páginas rechazan iframes y su login no corre embebido); el
-**Full sync** por capa — la curación manual que relista TODO el bucket y
-reconcilia el índice de Firestore; el **uso de Firebase** — lecturas, escrituras y borrados de
+**Regenerate tree in DB** por capa — el remedio manual: la app deja la
+orden en la base y una Cloud Function recorre el bucket y repara el índice,
+con el progreso a la vista; el **uso de Firebase** — lecturas, escrituras y borrados de
 Firestore de HOY, y bajada/conexiones/almacenado de la RTDB — y el **uso
 de Google Cloud** — almacenado del lake (según el índice), operaciones
 clase A/B y servido de GCS, salida de red de la VM, ejecuciones de la
@@ -61,23 +62,27 @@ carpeta `infra/`, deploy con `npm run infra:index`) desde las
 notificaciones Pub/Sub del bucket: cada archivo que aterriza está en el
 índice en segundos, con la app cerrada. **La app tiene UNA sola fuente:
 Firebase** — se suscribe (`onSnapshot` de HOY) y lee días y archivos de
-Firestore; jamás lista el bucket por su cuenta. GCS se toca en exactamente
-dos lugares: el **viewer** (el contenido de un archivo, de a uno) y el
-**Full sync** — el escaneo manual que REPARA el índice cuando se perdió la
-confianza (fantasmas por borrados a mano, notificaciones perdidas, función
-caída), pisando el árbol por diff sin borrar nada nacido después del
-inicio del escaneo. Sin la función instalada el índice no crece solo: Full
-sync es el remedio.
+Firestore; jamás lista el bucket por su cuenta. **La app ya ni siquiera
+toca el bucket para repararlo**: eso lo hace la otra función,
+`regenerate-tree` (deploy con `npm run infra:regenerate`), que se despierta
+cuando la app escribe la orden en `regenerateTree/{capa}` y devuelve su
+progreso por el mismo documento. Recorre el bucket, compara cada día con
+una agregación —una lectura— y sólo abre los días que no coinciden,
+escribiendo el diff sin borrar nada nacido después del inicio del escaneo.
+Es el remedio para cuando se perdió la confianza: fantasmas por borrados a
+mano, notificaciones perdidas o la función del índice caída. GCS lo toca la
+app en un solo lugar: el **viewer**, un objeto por click.
 
 ## Cómo está organizado
 
 La lógica del proceso principal vive en `src/main`, con **una carpeta por
-sección de la app** — [`live/`](src/main/live), [`ingest-monitor/`](src/main/ingest-monitor)
-(las pestañas Raw y Bronze) y [`config/`](src/main/config) —, cada una con
-su README de un párrafo que cuenta qué pide y en qué orden. En la raíz de
-`src/main` queda sólo lo que usan varias secciones: el `.env`, la app de
-Firebase, el cliente del lake, el puente IPC y el arranque de Electron.
-Los componentes que dibujan viven aparte, en `src/renderer`.
+sección de la app**: [`live/`](src/main/live), [`config/`](src/main/config) e
+[`ingestor-monitor/`](src/main/ingestor-monitor) — las pestañas Raw y
+Bronze, con su [README](src/main/ingestor-monitor/README.md) de qué hace
+cada pieza y qué cuesta cada llamada. En la raíz de `src/main` queda sólo lo
+que usan varias secciones: el `.env`, la app de Firebase, el cliente del
+lake, el puente IPC y el arranque de Electron. Los componentes que dibujan
+viven aparte, en `src/renderer`.
 
 ## Arranque
 

@@ -21,23 +21,26 @@ export interface RendererApi {
    */
   getLiveEvent(connectionId: string, eventId: string): Promise<unknown | null>
 
-  /** El índice de la capa (días, totales), de la foto del vigía. */
-  getLayerState(layer: LayerId): Promise<LayerState>
-  /** Curación manual: relista TODO el bucket y reconcilia el índice. */
-  relistLayer(layer: LayerId): Promise<LayerState>
-  /** Los archivos de UN día, del índice (Firestore/vigía) — metadata, no data. */
+  /** El árbol de las dos capas, mergeado (hoy vivo + historia). Devuelve el des-suscriptor. */
+  subscribeTree(callback: (snapshot: TreeSnapshot) => void): () => void
+  /** Los archivos de UN día, del índice — metadata, no data. */
   getDayFiles(layer: LayerId, day: string): Promise<DayFiles>
-  /** El contenido de UN archivo, pedido a S3 al momento — volátil, nada local. */
+  /** El contenido de UN archivo, pedido al lake al momento — volátil, nada local. */
   getFileSample(query: FileSampleQuery): Promise<FileSample>
 
-  /** Feed del vigía (contador y log de hoy). Devuelve el des-suscriptor. */
-  subscribeStatus(callback: (snapshot: StatusSnapshot) => void): () => void
+  /**
+   * Pide regenerar el árbol de una capa en la base. La app sólo deja la
+   * orden: el trabajo lo hace una Cloud Function, del lado de Google.
+   */
+  regenerateTreeInDb(layer: LayerId): Promise<void>
+
+  /** El estado de esa regeneración, en vivo. Devuelve el des-suscriptor. */
+  subscribeRegenerateTree(
+    callback: (snapshot: RegenerateTreeSnapshot) => void,
+  ): () => void
 
   /** Semáforo del ingestor (probe TCP periódico). Devuelve el des-suscriptor. */
   subscribeIngest(callback: (status: IngestStatus) => void): () => void
-
-  /** Frescura de cada capa contra el bucket. Devuelve el des-suscriptor. */
-  subscribeFreshness(callback: (snapshot: FreshnessSnapshot) => void): () => void
 
   /** Uso de Firestore y la RTDB (Cloud Monitoring). refresh=true re-consulta. */
   getFirebaseUsage(refresh: boolean): Promise<FirebaseUsage>
@@ -87,9 +90,9 @@ export interface EventDefinition {
 }
 
 /**
- * Los eventos que existen. Sale del registro declarado, leído DIRECTO de S3
- * (`schemas/<v>/events_v<v>.json`); si no está publicado, se cae a lo último
- * guardado en Firestore.
+ * Los eventos que existen. Sale del registro declarado, leído DIRECTO del
+ * lake (`schemas/event-types.json`); si no está publicado, se cae a lo
+ * último guardado en Firestore.
  */
 export interface EventCatalog {
   events: EventDefinition[]
@@ -105,35 +108,58 @@ export interface SettingsResult {
   error?: string
 }
 
-// ── Capas: el índice del bucket ────────────────────────────────
-// Nada local: el índice vive en FIRESTORE como relación de colecciones
-// (días → archivos) y el vigía lo mantiene con lo que descubre en `dt=hoy`.
+// ── El árbol: días con sus totales, mergeado ───────────────────
+// Nada local: el índice vive en FIRESTORE (días → archivos). Hoy llega por
+// suscripción; la historia por GET; el reconciliador los une y empuja ESTO.
 
-/** Una partición diaria de la capa en el bucket. */
+/** Un día de la capa: fecha, cantidad de archivos y peso sumado. */
 export interface LayerDay {
   date: string
   files: number
   bytes: number
 }
 
-export interface LayerState {
-  layer: LayerId
-  /** Instante del último refresco del índice, ISO en UTC. null = cargando. */
-  listedAt: string | null
+/**
+ * La frescura de una capa, en DÍAS UTC de calendario, nunca ventanas
+ * móviles: verde = hay data de HOY · naranja = lo más nuevo es de ayer a 6
+ * días · violeta = una semana o más · negra = nunca entró nada.
+ */
+export type Freshness = 'green' | 'orange' | 'violet' | 'black'
+
+/** Un renglón del log: un archivo que aterrizó HOY. */
+export interface TodayLogEntry {
+  file: string
+  day: string
+  size: number
+  /** El aterrizaje, ISO en UTC. */
+  at: string | null
+}
+
+/** Todo lo que la UI necesita de una capa, ya mergeado. */
+export interface LayerTree {
+  /** Los totales de hoy — siempre, aunque vayan 0. */
+  today: LayerDay
+  /** Todos los días con datos, el más nuevo primero (hoy incluido si tuvo). */
+  days: LayerDay[]
+  /** Totales de la capa entera. */
   files: number
   bytes: number
-  /** Particiones diarias, la más nueva primero. */
-  days: LayerDay[]
-  /** Los últimos archivos que aterrizaron — sin ventana: el log de la capa. */
-  latest: PipelineLogEntry[]
-  /** El índice no se pudo leer (Firestore) o reparar (Full sync). */
-  error?: string
+  freshness: Freshness
+  /** El log: los últimos ≤10 archivos de hoy, del más nuevo al más viejo. */
+  latest: TodayLogEntry[]
+  /** true = la historia ya cargó. */
+  loaded: boolean
+  error: string | null
+}
+
+export interface TreeSnapshot {
+  raw: LayerTree
+  bronze: LayerTree
 }
 
 // ── El día en archivos, y el viewer de un archivo ──────────────
-// El índice (días → archivos, con peso y fecha que el LIST trajo gratis)
-// vive en Firestore: abrir un día lee NOMBRES, jamás data. La data se toca
-// recién al abrir un archivo en el viewer — un objeto por click, volátil.
+// Abrir un día lee del índice NOMBRES, jamás data. La data se toca recién
+// al abrir un archivo en el viewer — un objeto por click, volátil.
 
 export interface DayFileEntry {
   name: string
@@ -172,52 +198,6 @@ export interface FileSample {
   error?: string
 }
 
-// ── El log de cada capa ────────────────────────────────────────
-// Un renglón por archivo aterrizado; viaja en LayerState.latest (los
-// últimos, sin ventana de tiempo), derivado del índice de Firebase.
-
-export interface PipelineLogEntry {
-  id: string
-  layer: LayerId
-  /** Key completa en el bucket. */
-  key: string
-  /** Último segmento de la key, para la tabla. */
-  file: string
-  size: number
-  /** El aterrizaje real en S3, ISO en UTC. */
-  lastModified: string | null
-}
-
-// ── Status: el contador de hoy ─────────────────────────────────
-// El log vive en cada pestaña de capa; acá quedan el contador y los avisos.
-
-export interface StatusSnapshot {
-  /** Batches que aterrizaron HOY (UTC), por capa. null = índice sin cargar. */
-  today: Record<LayerId, number | null>
-  /** Qué capas no puede leer el vigía, con el motivo. */
-  layerErrors: Partial<Record<LayerId, string>>
-}
-
-// ── Frescura de las capas (contra el bucket) ───────────────────
-
-/**
- * En DÍAS UTC de calendario, nunca ventanas móviles: verde = hay data de
- * HOY · naranja = lo más nuevo es de ayer a 6 días · violeta = una semana o
- * más · rojo = la capa nunca recibió nada.
- */
-export type LayerFreshnessState = 'green' | 'orange' | 'violet' | 'red'
-
-export interface LayerFreshness {
-  state: LayerFreshnessState
-  /**
-   * Instante del dato más nuevo de la capa en el bucket, ISO en UTC. Sale
-   * del prefijo de época de los archivos que escribe Vector. null = vacía.
-   */
-  lastDataAt: string | null
-}
-
-export type FreshnessSnapshot = Record<LayerId, LayerFreshness>
-
 // ── Ingestor: el semáforo ──────────────────────────────────────
 
 export interface IngestStatus {
@@ -231,6 +211,32 @@ export interface IngestStatus {
   checkedAt: string | null
   error?: string
 }
+
+// ── Regenerar el árbol en la base ──────────────────────────────
+
+/**
+ * El estado de la regeneración de una capa: el mismo documento que la app
+ * escribe para pedirla y que la Cloud Function va completando mientras
+ * trabaja. `idle` = nunca se pidió.
+ */
+export interface RegenerateTreeState {
+  layer: LayerId
+  state: 'idle' | 'requested' | 'running' | 'done' | 'error'
+  /** Cuándo se pidió, cuándo lo tomó la función y cuándo terminó. */
+  requestedAt: string | null
+  startedAt: string | null
+  finishedAt: string | null
+  /** Días a revisar y días ya revisados: el progreso. */
+  daysTotal: number
+  daysDone: number
+  /** De esos días, cuántos estaban mal y se repararon. */
+  daysRepaired: number
+  /** Documentos escritos o borrados en el índice. */
+  writes: number
+  error?: string
+}
+
+export type RegenerateTreeSnapshot = Record<LayerId, RegenerateTreeState>
 
 // ── Uso de Firebase (Cloud Monitoring) ─────────────────────────
 
@@ -277,9 +283,9 @@ export interface GcpUsage {
   from: string
   to: string
   /**
-   * El lake (raw + bronze) según el ÍNDICE del vigía — la vista del lake
-   * que la app reconoce. El gauge diario de GCS no publica aún en el
-   * proyecto, y sería una segunda fuente.
+   * El lake (raw + bronze) según el árbol mergeado — la vista del lake que
+   * la app reconoce. El gauge diario de GCS no publica aún en el proyecto,
+   * y sería una segunda fuente.
    */
   lakeStorageBytes: number | null
   /**

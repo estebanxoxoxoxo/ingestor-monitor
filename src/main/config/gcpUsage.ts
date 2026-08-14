@@ -1,7 +1,7 @@
 import { LAYERS } from '@shared/config'
 import type { GcpUsage } from '@shared/types'
 import { loadEnv } from '../env'
-import { getLayerState } from '../ingest-monitor/inventoryService'
+import { tree } from '../ingestor-monitor'
 import { gcsOpsByClass } from './gcsOps'
 import { DAY_MS, accessToken, gaugeNow, messageOf, sumByLabel, sumWindow } from './monitoring'
 
@@ -16,8 +16,8 @@ import { DAY_MS, accessToken, gaugeNow, messageOf, sumByLabel, sumWindow } from 
  *
  * El almacenado del LAKE no sale de Monitoring — el gauge diario de GCS
  * todavía no publica en este proyecto (verificado: 0 puntos en 8 días) y
- * sería una segunda fuente — sino del índice de Firestore que el vigía ya
- * tiene en memoria: la única vista del lake que la app reconoce, y gratis.
+ * sería una segunda fuente — sino del árbol mergeado que la app ya tiene en
+ * memoria: la única vista del lake que reconoce, y gratis.
  */
 
 const METRICS = {
@@ -47,8 +47,8 @@ let started = false
 
 export async function getGcpUsage(refresh: boolean): Promise<GcpUsage> {
   if (!cached || refresh || cached.error) cached = await fetchUsage()
-  // El almacenado del lake se lee SIEMPRE de la foto del vigía: es memoria
-  // pura, y así acompaña al índice aunque la consulta esté cacheada.
+  // El almacenado del lake se lee SIEMPRE del árbol en memoria: es gratis,
+  // y así acompaña al índice aunque la consulta esté cacheada.
   return { ...cached, lakeStorageBytes: lakeBytes() }
 }
 
@@ -59,16 +59,15 @@ export function startGcpUsage(): void {
   void getGcpUsage(false)
 }
 
-/** raw + bronze según el índice; null hasta que el vigía haya listado. */
+/** raw + bronze según el árbol mergeado; null hasta que la historia cargue. */
 function lakeBytes(): number | null {
   let total = 0
-  let listed = false
+  let loaded = false
   for (const layer of LAYERS) {
-    const state = getLayerState(layer)
-    if (state.listedAt) listed = true
-    total += state.bytes
+    if (tree[layer].loaded()) loaded = true
+    for (const day of tree[layer].days()) total += day.bytes
   }
-  return listed ? total : null
+  return loaded ? total : null
 }
 
 async function fetchUsage(): Promise<GcpUsage> {

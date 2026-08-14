@@ -1,14 +1,26 @@
 # Live — quién está en el sitio ahora mismo
 
-Muestra las sesiones abiertas en este momento. **Se suscribe una sola vez**
-al nodo `activeSessions` de la Realtime Database y esa suscripción queda
-abierta para siempre: los clientes escriben su entrada al conectarse y
-Firebase la borra al desconectarse, así que cada cambio llega empujado —
-como con varias sesiones eso son muchos avisos por segundo, se emite como
-mucho uno cada 400 ms, siempre con el último estado. Para poder nombrar y
-agrupar los eventos hace **una lectura más, una sola vez por corrida de la
-app**: el catálogo `schemas/event-types.json` del lake, que la suite
-publica desde sus propios enums; si ese archivo no está, cae a la última
-lista guardada en Firestore. Y los eventos marcados como relevantes se leen
-y se escriben en el documento `settings/data-analizer` de Firestore, para
-que la elección aparezca igual al abrir la app en otra máquina.
+Las sesiones abiertas en este momento.
+
+**1. Suscripción a las sesiones** · `activeSessions` en la Realtime
+Database — queda abierta
+
+- Trae: las sesiones vivas, y cada cambio apenas ocurre. El cliente escribe
+  su entrada al conectarse; Firebase la borra al desconectarse.
+- Emite: como mucho una actualización cada 400 ms, siempre con el último
+  estado — con varias sesiones son muchos avisos por segundo.
+- Usa: el planisferio, la lista de sesiones, el detalle de eventos.
+
+**2. Catálogo de eventos** · `schemas/event-types.json` del lake
+
+- Trae: qué eventos existen, con su label y su grupo. Lo publica la suite
+  desde sus propios enums.
+- Cae a: la última lista guardada en Firestore, si el archivo no está.
+- Cachea: toda la corrida de la app.
+- Usa: los nombres y los grupos del picker de relevantes.
+
+**3. Preferencias** · `settings/data-analizer` en Firestore
+
+- Trae y guarda: los eventos marcados como relevantes.
+- Usa: la línea de relevantes. Vive en la base, no en disco, para que la
+  elección aparezca igual al abrir la app en otra máquina.

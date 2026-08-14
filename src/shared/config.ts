@@ -6,8 +6,7 @@
  *
  * NADA LOCAL: la app no guarda data en disco. Lo persistente vive en
  * Firebase (índice del bucket y settings en Firestore, sesiones vivas en la
- * RTDB); a S3 sólo van el vigía (LIST de hoy) y el viewer (un archivo por
- * click, volátil).
+ * RTDB); al bucket sólo va el viewer (un archivo por click, volátil).
  */
 
 /** Preferencias de la app, compartidas entre máquinas. */
@@ -19,17 +18,33 @@ export const SETTINGS_DOC = {
 /**
  * Raíz del índice del bucket en Firestore, como relación de colecciones:
  * inventory/{capa}/days/{día} (marcador) /files/{nombre} (peso y fecha).
- * Lo alimenta la Lambda de las notificaciones de S3 (ver infra/) y lo
- * reconcilia la app; sólo hechos — los totales se agregan al leer.
+ * Lo alimenta la función de las notificaciones del lake (ver infra/); sólo
+ * hechos — los totales se agregan al leer.
  */
 export const INVENTORY_COLLECTION = 'inventory'
+
+/**
+ * Las órdenes de regeneración del árbol: un documento por capa, que es a la
+ * vez el pedido y el estado. La app lo escribe, la Cloud Function lo levanta
+ * y hace el trabajo del lado de Google, contando su progreso ahí mismo.
+ */
+export const REGENERATE_TREE_COLLECTION = 'regenerateTree'
+
+/**
+ * Dónde empieza el lake (`{ startDay: 'YYYY-MM-DD' }`): los días anteriores
+ * no se regeneran. Sin el documento, se mira toda la historia.
+ */
+export const LAKE_SETTINGS_DOC = {
+  collection: 'settings',
+  docId: 'lake',
+} as const
 
 /** Nodo de la Realtime Database con las sesiones abiertas. */
 export const LIVE_SESSIONS_PATH = 'activeSessions'
 
 /**
  * La cuenta de facturación que paga TODOS los proyectos. No es secreto:
- * identifica el informe de la consola que el botón de Status abre en el
+ * identifica el informe de la consola que el botón de Config abre en el
  * navegador (embeberlo es imposible: Google prohíbe sus páginas en
  * iframes y su login no corre embebido).
  */
@@ -41,17 +56,15 @@ export type LayerId = 'raw' | 'bronze'
 export const LAYERS: LayerId[] = ['raw', 'bronze']
 
 /**
- * El minuto del vigía: SOLO calendario, nada de red. La app tiene UNA
- * fuente (Firebase, por suscripción); esta pasada únicamente muda la
- * suscripción cuando cambia el día UTC y, en la gracia post-medianoche,
- * re-agrega los totales de ayer en Firestore.
+ * El minuto de la FSM del día: SOLO calendario, nada de red. Cada minuto se
+ * chequea si el día UTC cambió; cuando cambia, la suscripción de hoy se muda
+ * y la historia adopta el día que cerró.
  */
 export const WATCH_INTERVAL_MS = 60_000
 
 /**
- * Tras la medianoche UTC, Vector todavía puede volcar flushes en la
- * partición de AYER (eventos de 23:5x): durante esta gracia el vigía
- * también reconcilia ese día.
+ * Cuánto después de la medianoche se re-agrega UNA vez el día que cerró:
+ * un flush con el reloj apenas atrasado todavía puede aterrizar ahí.
  */
 export const ROLLOVER_GRACE_MS = 10 * 60_000
 
@@ -78,16 +91,15 @@ export const IPC = {
   liveUnsubscribe: 'live:unsubscribe',
   liveSnapshot: 'live:snapshot',
   liveEvent: 'live:event',
-  layerState: 'layer:state',
-  layerRelist: 'layer:relist',
+  treeSubscribe: 'tree:subscribe',
+  treeUnsubscribe: 'tree:unsubscribe',
+  treeSnapshot: 'tree:snapshot',
   layerDayFiles: 'layer:day-files',
+  regenerateTreeInDb: 'tree:regenerate',
+  regenerateTreeSubscribe: 'tree:regenerate-subscribe',
+  regenerateTreeUnsubscribe: 'tree:regenerate-unsubscribe',
+  regenerateTreeSnapshot: 'tree:regenerate-snapshot',
   sampleFile: 'sample:file',
-  statusSubscribe: 'status:subscribe',
-  statusUnsubscribe: 'status:unsubscribe',
-  statusSnapshot: 'status:snapshot',
-  freshnessSubscribe: 'freshness:subscribe',
-  freshnessUnsubscribe: 'freshness:unsubscribe',
-  freshnessSnapshot: 'freshness:snapshot',
   ingestSubscribe: 'ingest:subscribe',
   ingestUnsubscribe: 'ingest:unsubscribe',
   ingestStatus: 'ingest:status',

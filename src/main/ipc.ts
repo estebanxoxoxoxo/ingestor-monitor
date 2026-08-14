@@ -10,25 +10,25 @@ import type {
   FileSampleQuery,
   FirebaseUsage,
   GcpUsage,
-  LayerState,
   SettingsResult,
 } from '@shared/types'
 import { loadEnv } from './env'
-// Config: el semáforo del ingestor y las tarjetas de uso.
+// Config: el semáforo del ingestor, las tarjetas de uso y el remedio del índice.
 import { getFirebaseUsage, startFirebaseUsage } from './config/firebaseUsage'
 import { getGcpUsage, startGcpUsage } from './config/gcpUsage'
 import { startPinger, subscribeIngest } from './config/ingestPinger'
-// Ingest monitor: el índice del lake y el viewer de archivos.
-import { baseName, instantOf } from './ingest-monitor/indexMath'
 import {
-  dayObjects,
-  getLayerState,
-  relistLayer,
-  startInventory,
-  subscribeFreshness,
-  subscribeStatus,
-} from './ingest-monitor/inventoryService'
-import { getFileSample } from './ingest-monitor/sampleService'
+  regenerateTreeInDb,
+  startRegenerateTree,
+  subscribeRegenerateTree,
+} from './config/regenerateTree'
+// Ingestor monitor: el árbol del lake y el viewer de archivos.
+import {
+  getDayFiles,
+  getFileSample,
+  startIngestorMonitor,
+  subscribeTree,
+} from './ingestor-monitor'
 // Live: las sesiones abiertas, su catálogo de eventos y sus preferencias.
 import { getEventCatalog } from './live/catalogService'
 import { getLiveEvent, subscribeLive } from './live/liveService'
@@ -37,34 +37,52 @@ import { readSettings, writeSettings } from './live/settingsService'
 const asLayer = (value: unknown): LayerId => (value === 'raw' ? 'raw' : 'bronze')
 
 export function registerIpc(): void {
-  // El vigía, el semáforo y los usos arrancan con la app: se alimentan
+  // El monitor, el semáforo y los usos arrancan con la app: se alimentan
   // aunque nadie esté mirando.
-  startInventory()
+  startIngestorMonitor()
   startPinger()
   startFirebaseUsage()
   startGcpUsage()
+  startRegenerateTree()
 
-  // ── Capas: índice del bucket y viewer de archivos ────────────
+  // Cada canal con suscripción guarda UN des-suscriptor por ventana; el
+  // oyente de 'destroyed' es único por ventana para no acumular listeners.
+  const treeByWebContents = new Map<WebContents, () => void>()
+  const regenerateByWebContents = new Map<WebContents, () => void>()
+  const ingestByWebContents = new Map<WebContents, () => void>()
+  const liveByWebContents = new Map<WebContents, () => void>()
 
-  ipcMain.handle(IPC.layerState, (_event, rawLayer: unknown): LayerState => {
-    return getLayerState(asLayer(rawLayer))
+  const stop = (map: Map<WebContents, () => void>, sender: WebContents): void => {
+    map.get(sender)?.()
+    map.delete(sender)
+  }
+
+  const destroyHooked = new WeakSet<WebContents>()
+  const hookDestroy = (sender: WebContents): void => {
+    if (destroyHooked.has(sender)) return
+    destroyHooked.add(sender)
+    sender.once('destroyed', () => {
+      stop(treeByWebContents, sender)
+      stop(regenerateByWebContents, sender)
+      stop(ingestByWebContents, sender)
+      stop(liveByWebContents, sender)
+    })
+  }
+
+  // ── El árbol: el único feed de las capas ─────────────────────
+
+  ipcMain.handle(IPC.treeSubscribe, (event): void => {
+    const sender = event.sender
+    stop(treeByWebContents, sender)
+    const unsubscribe = subscribeTree((snapshot) => {
+      if (!sender.isDestroyed()) sender.send(IPC.treeSnapshot, snapshot)
+    })
+    treeByWebContents.set(sender, unsubscribe)
+    hookDestroy(sender)
   })
 
-  ipcMain.handle(IPC.layerRelist, async (_event, rawLayer: unknown): Promise<LayerState> => {
-    const layer = asLayer(rawLayer)
-    try {
-      return await relistLayer(layer)
-    } catch (error) {
-      return {
-        layer,
-        listedAt: null,
-        files: 0,
-        bytes: 0,
-        days: [],
-        latest: [],
-        error: messageOf(error),
-      }
-    }
+  ipcMain.handle(IPC.treeUnsubscribe, (event): void => {
+    stop(treeByWebContents, event.sender)
   })
 
   ipcMain.handle(
@@ -73,20 +91,7 @@ export function registerIpc(): void {
       const layer = asLayer(rawLayer)
       const day = String(rawDay ?? '')
       try {
-        const objects = await dayObjects(layer, day)
-        const sorted = [...objects].sort((a, b) => instantOf(b) - instantOf(a))
-        return {
-          layer,
-          day,
-          files: sorted.map((object) => ({
-            name: baseName(object.key),
-            size: object.size,
-            at:
-              object.lastModified ??
-              (instantOf(object) > 0 ? new Date(instantOf(object)).toISOString() : null),
-          })),
-          bytes: objects.reduce((sum, object) => sum + object.size, 0),
-        }
+        return await getDayFiles(layer, day)
       } catch (error) {
         return { layer, day, files: [], bytes: 0, error: messageOf(error) }
       }
@@ -104,79 +109,33 @@ export function registerIpc(): void {
     },
   )
 
-  // ── Status: feed del vigía ───────────────────────────────────
+  // ── Regeneración del árbol: la orden y su progreso ───────────
 
-  const statusByWebContents = new Map<WebContents, () => void>()
+  // La app sólo deja la orden en Firestore. El escaneo del bucket y la
+  // reparación del índice ocurren en la Cloud Function.
+  ipcMain.handle(IPC.regenerateTreeInDb, async (_event, rawLayer: unknown): Promise<void> => {
+    await regenerateTreeInDb(asLayer(rawLayer))
+  })
 
-  const stopStatus = (sender: WebContents): void => {
-    statusByWebContents.get(sender)?.()
-    statusByWebContents.delete(sender)
-  }
-
-  // UN solo oyente de 'destroyed' por ventana, para TODOS los canales. Si se
-  // agregara uno por (re)suscripción, se acumularían con cada cambio de
-  // pestaña hasta el warning de MaxListeners de Node.
-  const destroyHooked = new WeakSet<WebContents>()
-  const hookDestroy = (sender: WebContents): void => {
-    if (destroyHooked.has(sender)) return
-    destroyHooked.add(sender)
-    sender.once('destroyed', () => {
-      stopStatus(sender)
-      stopFreshness(sender)
-      stopIngest(sender)
-      stopLive(sender)
-    })
-  }
-
-  ipcMain.handle(IPC.statusSubscribe, (event): void => {
+  ipcMain.handle(IPC.regenerateTreeSubscribe, (event): void => {
     const sender = event.sender
-    stopStatus(sender)
-    const unsubscribe = subscribeStatus((snapshot) => {
-      if (!sender.isDestroyed()) sender.send(IPC.statusSnapshot, snapshot)
+    stop(regenerateByWebContents, sender)
+    const unsubscribe = subscribeRegenerateTree((snapshot) => {
+      if (!sender.isDestroyed()) sender.send(IPC.regenerateTreeSnapshot, snapshot)
     })
-    statusByWebContents.set(sender, unsubscribe)
+    regenerateByWebContents.set(sender, unsubscribe)
     hookDestroy(sender)
   })
 
-  ipcMain.handle(IPC.statusUnsubscribe, (event): void => {
-    stopStatus(event.sender)
-  })
-
-  // ── Frescura de las capas ────────────────────────────────────
-
-  const freshnessByWebContents = new Map<WebContents, () => void>()
-
-  const stopFreshness = (sender: WebContents): void => {
-    freshnessByWebContents.get(sender)?.()
-    freshnessByWebContents.delete(sender)
-  }
-
-  ipcMain.handle(IPC.freshnessSubscribe, (event): void => {
-    const sender = event.sender
-    stopFreshness(sender)
-    const unsubscribe = subscribeFreshness((snapshot) => {
-      if (!sender.isDestroyed()) sender.send(IPC.freshnessSnapshot, snapshot)
-    })
-    freshnessByWebContents.set(sender, unsubscribe)
-    hookDestroy(sender)
-  })
-
-  ipcMain.handle(IPC.freshnessUnsubscribe, (event): void => {
-    stopFreshness(event.sender)
+  ipcMain.handle(IPC.regenerateTreeUnsubscribe, (event): void => {
+    stop(regenerateByWebContents, event.sender)
   })
 
   // ── Semáforo del ingestor ────────────────────────────────────
 
-  const ingestByWebContents = new Map<WebContents, () => void>()
-
-  const stopIngest = (sender: WebContents): void => {
-    ingestByWebContents.get(sender)?.()
-    ingestByWebContents.delete(sender)
-  }
-
   ipcMain.handle(IPC.ingestSubscribe, (event): void => {
     const sender = event.sender
-    stopIngest(sender)
+    stop(ingestByWebContents, sender)
     const unsubscribe = subscribeIngest((status) => {
       if (!sender.isDestroyed()) sender.send(IPC.ingestStatus, status)
     })
@@ -185,7 +144,7 @@ export function registerIpc(): void {
   })
 
   ipcMain.handle(IPC.ingestUnsubscribe, (event): void => {
-    stopIngest(event.sender)
+    stop(ingestByWebContents, event.sender)
   })
 
   // ── Uso de Firebase y de Google Cloud ────────────────────────
@@ -246,18 +205,10 @@ export function registerIpc(): void {
   )
 
   // ── Vivo ─────────────────────────────────────────────────────
-  // Una suscripción por ventana. Se corta sola si la ventana se destruye, para
-  // no dejar el listener de la RTDB colgado.
-  const liveByWebContents = new Map<WebContents, () => void>()
-
-  const stopLive = (sender: WebContents): void => {
-    liveByWebContents.get(sender)?.()
-    liveByWebContents.delete(sender)
-  }
 
   ipcMain.handle(IPC.liveSubscribe, (event): void => {
     const sender = event.sender
-    stopLive(sender)
+    stop(liveByWebContents, sender)
     const unsubscribe = subscribeLive((snapshot) => {
       if (!sender.isDestroyed()) sender.send(IPC.liveSnapshot, snapshot)
     })
@@ -266,7 +217,7 @@ export function registerIpc(): void {
   })
 
   ipcMain.handle(IPC.liveUnsubscribe, (event): void => {
-    stopLive(event.sender)
+    stop(liveByWebContents, event.sender)
   })
 
   ipcMain.handle(

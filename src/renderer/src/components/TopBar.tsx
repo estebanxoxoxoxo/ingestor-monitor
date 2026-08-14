@@ -1,6 +1,5 @@
 import type { LayerId } from '@shared/config'
-import type { FreshnessSnapshot, IngestStatus, LayerFreshness } from '@shared/types'
-import { formatAgo } from '../lib/format'
+import type { IngestStatus, LayerTree, TreeSnapshot } from '@shared/types'
 import type { View } from '../App'
 
 interface Props {
@@ -8,10 +7,8 @@ interface Props {
   onView: (view: View) => void
   /** El semáforo del ingestor: pinta el punto de la pestaña Config. */
   ingest: IngestStatus | null
-  /** Batches que aterrizaron HOY (UTC) por capa. */
-  today: Record<LayerId, number | null> | null
-  /** Frescura de cada capa contra la caché local: los puntos de Raw/Bronze. */
-  freshness: FreshnessSnapshot | null
+  /** El árbol mergeado: contadores de hoy y puntos de frescura. */
+  tree: TreeSnapshot | null
 }
 
 /** El punto rojo titilante va sólo en Vivo: es la señal de aire. */
@@ -22,13 +19,14 @@ const VIEWS: { id: View; label: string; live?: boolean; layer?: LayerId }[] = [
   { id: 'config', label: 'Config' },
 ]
 
-/** Tooltip del punto de una capa: qué edad tiene el dato más nuevo local. */
-function freshHint(entry: LayerFreshness | undefined): string {
-  if (!entry || !entry.lastDataAt) return 'La caché nunca recibió datos de esta capa.'
-  return `Último dato en la caché: ${formatAgo(entry.lastDataAt)}`
+/** Tooltip del punto de una capa: de cuándo es el dato más nuevo. */
+function freshHint(layer: LayerTree | undefined): string {
+  const newestDay = layer?.days[0]?.date
+  if (!newestDay) return 'La capa nunca recibió datos.'
+  return `Último día con datos: ${newestDay}`
 }
 
-export function TopBar({ view, onView, ingest, today, freshness }: Props) {
+export function TopBar({ view, onView, ingest, tree }: Props) {
   const ingestState = ingest?.state ?? 'unknown'
   const ingestHint =
     ingestState === 'up'
@@ -55,14 +53,14 @@ export function TopBar({ view, onView, ingest, today, freshness }: Props) {
                 item.id === 'config'
                   ? ingestHint
                   : item.layer
-                    ? freshHint(freshness?.[item.layer])
+                    ? freshHint(tree?.[item.layer])
                     : undefined
               }
             >
               {item.live && <span className="live-blink" aria-hidden="true" />}
               {item.layer && (
                 <span
-                  className={`fresh-dot ${freshness?.[item.layer]?.state ?? 'red'}`}
+                  className={`fresh-dot ${tree?.[item.layer]?.freshness ?? 'black'}`}
                   aria-hidden="true"
                 />
               )}
@@ -78,13 +76,13 @@ export function TopBar({ view, onView, ingest, today, freshness }: Props) {
       <div className="topbar-right">
         <span
           className="topbar-ingested"
-          title="Batches (archivos) que aterrizaron en el bucket hoy, día UTC. Lo deduce el vigía de cada listado."
+          title="Archivos que aterrizaron en el bucket hoy, día UTC."
         >
           ingestado hoy (UTC):
           <span className="layer-badge raw">raw</span>
-          <strong>{today?.raw ?? '—'}</strong>
+          <strong>{tree ? tree.raw.today.files : '—'}</strong>
           <span className="layer-badge bronze">bronze</span>
-          <strong>{today?.bronze ?? '—'}</strong>
+          <strong>{tree ? tree.bronze.today.files : '—'}</strong>
         </span>
       </div>
     </header>

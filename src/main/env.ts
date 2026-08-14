@@ -7,7 +7,7 @@ import { config as loadDotenv } from 'dotenv'
  * TODA la plataforma vive en un solo proyecto de Google: la única credencial
  * que la app necesita es la service account de Firebase — con ella firma
  * Firestore (el índice), la RTDB (Vivo) y el lake en Cloud Storage (el
- * viewer y el Full sync). En el .env no existe ninguna otra clave.
+ * viewer y la regeneración del árbol). En el .env no existe ninguna otra clave.
  */
 
 export interface AppEnv {

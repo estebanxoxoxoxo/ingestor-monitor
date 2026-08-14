@@ -596,9 +596,9 @@ body {
   background: color-mix(in srgb, var(--live-dot) 22%, transparent);
 }
 
-/* La frescura de cada capa contra la caché local, en días UTC de
-   calendario: verde = data de HOY, naranja = de ayer a 6 días, violeta =
-   una semana o más, rojo = nunca. */
+/* La frescura de cada capa, en días UTC de calendario: verde = data de
+   HOY, naranja = de ayer a 6 días, violeta = una semana o más, negra =
+   nunca entró nada. */
 .fresh-dot {
   display: inline-block;
   width: 8px;
@@ -619,8 +619,9 @@ body {
   background: var(--chosen);
 }
 
-.fresh-dot.red {
-  background: var(--error);
+.fresh-dot.black {
+  background: #000;
+  box-shadow: inset 0 0 0 1px var(--text-dim);
 }
 
 /* El semáforo del ingestor: verde escuchando, rojo caído, gris sin chequeo. */

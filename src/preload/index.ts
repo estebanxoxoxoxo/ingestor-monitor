@@ -10,13 +10,12 @@ import type {
   FileSampleQuery,
   FirebaseUsage,
   GcpUsage,
-  FreshnessSnapshot,
   IngestStatus,
-  LayerState,
   LiveSnapshot,
+  RegenerateTreeSnapshot,
   RendererApi,
   SettingsResult,
-  StatusSnapshot,
+  TreeSnapshot,
 } from '@shared/types'
 
 /**
@@ -34,11 +33,16 @@ const api: RendererApi = {
   getLiveEvent: (connectionId: string, eventId: string): Promise<unknown | null> =>
     ipcRenderer.invoke(IPC.liveEvent, connectionId, eventId),
 
-  getLayerState: (layer: LayerId): Promise<LayerState> =>
-    ipcRenderer.invoke(IPC.layerState, layer),
-
-  relistLayer: (layer: LayerId): Promise<LayerState> =>
-    ipcRenderer.invoke(IPC.layerRelist, layer),
+  subscribeTree: (callback: (snapshot: TreeSnapshot) => void): (() => void) => {
+    const listener = (_event: IpcRendererEvent, snapshot: TreeSnapshot): void =>
+      callback(snapshot)
+    ipcRenderer.on(IPC.treeSnapshot, listener)
+    void ipcRenderer.invoke(IPC.treeSubscribe)
+    return () => {
+      ipcRenderer.off(IPC.treeSnapshot, listener)
+      void ipcRenderer.invoke(IPC.treeUnsubscribe)
+    }
+  },
 
   getDayFiles: (layer: LayerId, day: string): Promise<DayFiles> =>
     ipcRenderer.invoke(IPC.layerDayFiles, layer, day),
@@ -46,14 +50,19 @@ const api: RendererApi = {
   getFileSample: (query: FileSampleQuery): Promise<FileSample> =>
     ipcRenderer.invoke(IPC.sampleFile, query),
 
-  subscribeStatus: (callback: (snapshot: StatusSnapshot) => void): (() => void) => {
-    const listener = (_event: IpcRendererEvent, snapshot: StatusSnapshot): void =>
+  regenerateTreeInDb: (layer: LayerId): Promise<void> =>
+    ipcRenderer.invoke(IPC.regenerateTreeInDb, layer),
+
+  subscribeRegenerateTree: (
+    callback: (snapshot: RegenerateTreeSnapshot) => void,
+  ): (() => void) => {
+    const listener = (_event: IpcRendererEvent, snapshot: RegenerateTreeSnapshot): void =>
       callback(snapshot)
-    ipcRenderer.on(IPC.statusSnapshot, listener)
-    void ipcRenderer.invoke(IPC.statusSubscribe)
+    ipcRenderer.on(IPC.regenerateTreeSnapshot, listener)
+    void ipcRenderer.invoke(IPC.regenerateTreeSubscribe)
     return () => {
-      ipcRenderer.off(IPC.statusSnapshot, listener)
-      void ipcRenderer.invoke(IPC.statusUnsubscribe)
+      ipcRenderer.off(IPC.regenerateTreeSnapshot, listener)
+      void ipcRenderer.invoke(IPC.regenerateTreeUnsubscribe)
     }
   },
 
@@ -64,17 +73,6 @@ const api: RendererApi = {
     return () => {
       ipcRenderer.off(IPC.ingestStatus, listener)
       void ipcRenderer.invoke(IPC.ingestUnsubscribe)
-    }
-  },
-
-  subscribeFreshness: (callback: (snapshot: FreshnessSnapshot) => void): (() => void) => {
-    const listener = (_event: IpcRendererEvent, snapshot: FreshnessSnapshot): void =>
-      callback(snapshot)
-    ipcRenderer.on(IPC.freshnessSnapshot, listener)
-    void ipcRenderer.invoke(IPC.freshnessSubscribe)
-    return () => {
-      ipcRenderer.off(IPC.freshnessSnapshot, listener)
-      void ipcRenderer.invoke(IPC.freshnessUnsubscribe)
     }
   },
 

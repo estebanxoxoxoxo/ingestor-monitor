@@ -1,13 +1,26 @@
-import { useState } from 'react'
 import { LAYERS } from '@shared/config'
-import type { LayerId } from '@shared/config'
-import type { IngestStatus, StatusSnapshot } from '@shared/types'
+import type { IngestStatus, RegenerateTreeState, TreeSnapshot } from '@shared/types'
 import { formatBytes, formatUtcInstant, formatUtcTime } from '../lib/format'
 import { useFirebaseUsage } from '../hooks/useFirebaseUsage'
 import { useGcpUsage } from '../hooks/useGcpUsage'
+import { useRegenerateTree } from '../hooks/useRegenerateTree'
 
 const cantidad = (value: number | null): string =>
   value === null ? '—' : value.toLocaleString('es-AR')
+
+/** Una línea con lo que está haciendo (o hizo) la regeneración de una capa. */
+function estadoDeRegeneracion(task: RegenerateTreeState | undefined): string {
+  if (!task || task.state === 'idle') return '—'
+  if (task.state === 'requested') return 'Pedido: esperando a que Google lo tome…'
+  if (task.state === 'running') {
+    const total = task.daysTotal > 0 ? `/${task.daysTotal}` : ''
+    return `Revisando días ${task.daysDone}${total} · ${task.daysRepaired} reparados`
+  }
+  if (task.state === 'error') return task.error ?? 'Falló'
+  return `${task.daysDone} días revisados · ${task.daysRepaired} reparados · ${
+    task.writes
+  } cambios · ${formatUtcTime(task.finishedAt ?? '')} UTC`
+}
 
 const tamano = (value: number | null): string => (value === null ? '—' : formatBytes(value))
 
@@ -68,51 +81,24 @@ function Porcentaje({ value, limit }: { value: number | null; limit: number }) {
 interface Props {
   /** El semáforo del ingestor. La suscripción vive en App. */
   ingest: IngestStatus | null
-  /** El snapshot del vigía (contadores y avisos). La suscripción vive en App. */
-  snapshot: StatusSnapshot | null
+  /** El árbol mergeado: de acá salen los avisos de cada capa. */
+  tree: TreeSnapshot | null
 }
 
 /**
  * La pestaña Config — el tablero de guardia y de operación: el semáforo
  * del ingestor, los accesos a las consolas de facturación (GC) y uso
  * (Firebase) — se abren en el navegador porque Google no permite
- * embeberlas —, el Full sync del índice por capa (la curación manual), y
- * el uso de Firebase (Firestore + RTDB) y de Google Cloud (GCS, VM,
- * función, Pub/Sub) vía Cloud Monitoring. El log de ingestados vive en la
- * pestaña de cada capa.
+ * embeberlas —, la regeneración del árbol en la base, y el uso de Firebase
+ * (Firestore + RTDB) y de Google Cloud (GCS, VM, función, Pub/Sub) vía
+ * Cloud Monitoring. El log de ingestados vive en la pestaña de cada capa.
  */
-export function ConfigView({ ingest, snapshot }: Props) {
+export function ConfigView({ ingest, tree }: Props) {
   const firebase = useFirebaseUsage()
   const gcp = useGcpUsage()
-
-  // Full sync por capa: la única operación que toca el bucket entero. El
-  // resultado queda a la vista; las pestañas Raw/Bronze releen el índice
-  // reparado al entrar.
-  const [syncing, setSyncing] = useState<Record<LayerId, boolean>>({
-    raw: false,
-    bronze: false,
-  })
-  const [synced, setSynced] = useState<Record<LayerId, string | null>>({
-    raw: null,
-    bronze: null,
-  })
-
-  const fullSync = async (layer: LayerId): Promise<void> => {
-    setSyncing((prev) => ({ ...prev, [layer]: true }))
-    try {
-      const state = await window.api.relistLayer(layer)
-      setSynced((prev) => ({
-        ...prev,
-        [layer]: state.error
-          ? state.error
-          : `Reconciliado: ${state.files} archivos · ${formatBytes(state.bytes)} · ${formatUtcTime(
-              state.listedAt ?? '',
-            )} UTC`,
-      }))
-    } finally {
-      setSyncing((prev) => ({ ...prev, [layer]: false }))
-    }
-  }
+  // Pedir la regeneración es dejar una orden: el trabajo ocurre en Google y
+  // el progreso llega solo. La app puede cerrarse mientras tanto.
+  const regenerate = useRegenerateTree()
 
   return (
     <main className="workspace ops-view">
@@ -164,42 +150,46 @@ export function ConfigView({ ingest, snapshot }: Props) {
         </div>
       </section>
 
-      {/* ── Full sync del índice ────────────────────────────── */}
+      {/* ── Regenerate tree in DB ───────────────────────────── */}
       <section className="ops-panel">
-        <h2 className="ops-title">Índice del lake · Full sync</h2>
+        <h2 className="ops-title">Índice del lake · Regenerate tree in DB</h2>
         <table className="ops-table striped">
           <thead>
             <tr>
               <th>Capa</th>
-              <th>Último resultado</th>
+              <th>Estado</th>
               <th className="ops-num" aria-label="acción" />
             </tr>
           </thead>
           <tbody>
-            {LAYERS.map((layer) => (
-              <tr key={layer}>
-                <td>
-                  <span className={`layer-badge ${layer}`}>{layer}</span>
-                </td>
-                <td>{synced[layer] ?? '—'}</td>
-                <td className="ops-num">
-                  <button
-                    className="sync-button"
-                    onClick={() => void fullSync(layer)}
-                    disabled={syncing[layer]}
-                    title="Relista TODO el bucket y reconcilia el índice en Firestore"
-                  >
-                    <span
-                      className={syncing[layer] ? 'sync-icon spinning' : 'sync-icon'}
-                      aria-hidden="true"
+            {LAYERS.map((layer) => {
+              const task = regenerate.snapshot?.[layer]
+              const working = task?.state === 'requested' || task?.state === 'running'
+              return (
+                <tr key={layer}>
+                  <td>
+                    <span className={`layer-badge ${layer}`}>{layer}</span>
+                  </td>
+                  <td>{estadoDeRegeneracion(task)}</td>
+                  <td className="ops-num">
+                    <button
+                      className="sync-button"
+                      onClick={() => regenerate.request(layer)}
+                      disabled={working}
+                      title="Deja la orden en la base: el bucket se recorre y el índice se repara del lado de Google, con la app cerrada"
                     >
-                      ⟳
-                    </span>
-                    {syncing[layer] ? 'Sincronizando…' : 'Full sync'}
-                  </button>
-                </td>
-              </tr>
-            ))}
+                      <span
+                        className={working ? 'sync-icon spinning' : 'sync-icon'}
+                        aria-hidden="true"
+                      >
+                        ⟳
+                      </span>
+                      {working ? 'Regenerating…' : 'Regenerate tree in DB'}
+                    </button>
+                  </td>
+                </tr>
+              )
+            })}
           </tbody>
         </table>
       </section>
@@ -370,7 +360,7 @@ export function ConfigView({ ingest, snapshot }: Props) {
                 <td>GCS · servido del mes</td>
                 <td
                   className="ops-num"
-                  title="Bytes que GCS respondió a cualquier destino (viewer, full sync, la VM): cota superior del egreso. Gratis: 100 GB por mes"
+                  title="Bytes que GCS respondió a cualquier destino (viewer, regeneración, la VM): cota superior del egreso. Gratis: 100 GB por mes"
                 >
                   {tamano(gcp.usage.gcsSentBytes)}
                   <Porcentaje value={gcp.usage.gcsSentBytes} limit={FREE_TIER_GC.gcsSentBytes} />
@@ -427,14 +417,14 @@ export function ConfigView({ ingest, snapshot }: Props) {
         )}
       </section>
 
-      {/* ── Avisos del vigía ────────────────────────────────── */}
-      {snapshot &&
+      {/* ── Avisos del árbol ────────────────────────────────── */}
+      {tree &&
         LAYERS.map((layer) => {
-          const error = snapshot.layerErrors[layer]
+          const error = tree[layer].error
           if (!error) return null
           return (
             <p key={layer} className="workspace-warning">
-              El vigía no puede leer la capa <strong>{layer}</strong>. Detalle: {error}
+              No se puede leer la capa <strong>{layer}</strong>. Detalle: {error}
             </p>
           )
         })}

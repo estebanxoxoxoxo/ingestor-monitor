@@ -1,8 +1,7 @@
 import { useState } from 'react'
 import type { LayerId } from '@shared/config'
-import type { DayFileEntry, PipelineLogEntry } from '@shared/types'
+import type { DayFileEntry, LayerTree, TodayLogEntry } from '@shared/types'
 import { formatBytes, formatUtcStamp } from '../lib/format'
-import { useLayerIndex } from '../hooks/useLayerIndex'
 import { DayView } from './DayView'
 import { FileView } from './FileView'
 
@@ -10,6 +9,8 @@ interface Props {
   layer: LayerId
   /** Cómo se llama la capa en la UI: 'Raw' o 'Bronze'. */
   title: string
+  /** El árbol mergeado de ESTA capa. La suscripción vive en App. */
+  tree: LayerTree | null
 }
 
 interface ViewerTarget {
@@ -18,13 +19,11 @@ interface ViewerTarget {
 }
 
 /**
- * Una capa del bucket, SIN nada local: el índice vive en Firestore — lo
- * alimenta la función de las notificaciones del lake. Arriba, el log con los
- * últimos archivos que aterrizaron (sin ventana) y su vista previa; abajo,
- * el árbol de días. El Full sync (la curación manual) vive en Config.
+ * Una capa del bucket. Arriba, el log de lo que aterrizó HOY (en vivo) con
+ * su vista previa; abajo, el árbol de días. Todo sale del snapshot mergeado
+ * que baja por props — acá no se pide nada.
  */
-export function LayerView({ layer, title }: Props) {
-  const { state } = useLayerIndex(layer)
+export function LayerView({ layer, title, tree }: Props) {
   const [day, setDay] = useState<string | null>(null)
   const [viewer, setViewer] = useState<ViewerTarget | null>(null)
   const [filter, setFilter] = useState('')
@@ -44,16 +43,14 @@ export function LayerView({ layer, title }: Props) {
   }
 
   const needle = filter.trim()
-  const days = (state?.days ?? []).filter((entry) => !needle || entry.date.includes(needle))
-  const entries = state?.latest ?? []
+  const days = (tree?.days ?? []).filter((entry) => !needle || entry.date.includes(needle))
+  const entries = tree?.latest ?? []
 
-  /** Ver del log → el viewer de ese archivo (el día sale de la key). */
-  const abrir = (entry: PipelineLogEntry): void => {
-    const dia = entry.key.match(/dt=(\d{4}-\d{2}-\d{2})\//)?.[1]
-    if (!dia) return
+  /** Ver del log → el viewer de ese archivo. */
+  const openViewer = (entry: TodayLogEntry): void => {
     setViewer({
-      day: dia,
-      file: { name: entry.file, size: entry.size, at: entry.lastModified },
+      day: entry.day,
+      file: { name: entry.file, size: entry.size, at: entry.at },
     })
   }
 
@@ -61,22 +58,21 @@ export function LayerView({ layer, title }: Props) {
     <main className="workspace ops-view">
       <div className="workspace-bar">
         <span>
-          <strong>{state ? state.files : '—'}</strong> archivos ·{' '}
-          {state ? formatBytes(state.bytes) : '—'}
+          <strong>{tree ? tree.files : '—'}</strong> archivos ·{' '}
+          {tree ? formatBytes(tree.bytes) : '—'}
         </span>
       </div>
 
-      {state?.error && <p className="workspace-warning">{state.error}</p>}
+      {tree?.error && <p className="workspace-warning">{tree.error}</p>}
 
-      {/* ── El log: los últimos archivos, sin ventana ────────── */}
+      {/* ── El log: lo ingestado hoy, en vivo ────────────────── */}
       <section className="ops-panel">
-        <h2 className="ops-title">Ingestado · log</h2>
+        <h2 className="ops-title">Ingestado hoy (UTC) · log</h2>
         {entries.length > 0 ? (
           <table className="ops-table striped">
             <thead>
               <tr>
                 <th>Subido</th>
-                <th>Capa</th>
                 <th>Archivo</th>
                 <th>Tamaño</th>
                 <th className="ops-num" aria-label="vista previa" />
@@ -84,20 +80,15 @@ export function LayerView({ layer, title }: Props) {
             </thead>
             <tbody>
               {entries.map((entry) => (
-                <tr key={entry.id}>
-                  <td>{entry.lastModified ? formatUtcStamp(entry.lastModified) : '—'}</td>
-                  <td>
-                    <span className={`layer-badge ${entry.layer}`}>{entry.layer}</span>
-                  </td>
-                  <td className="ops-file" title={entry.key}>
-                    {entry.file}
-                  </td>
+                <tr key={entry.file}>
+                  <td>{entry.at ? formatUtcStamp(entry.at) : '—'}</td>
+                  <td className="ops-file">{entry.file}</td>
                   <td>{formatBytes(entry.size)}</td>
                   <td className="ops-num">
                     <button
                       className="ver-btn"
                       title="Abrir la vista previa del archivo"
-                      onClick={() => abrir(entry)}
+                      onClick={() => openViewer(entry)}
                     >
                       Ver
                     </button>
@@ -107,7 +98,9 @@ export function LayerView({ layer, title }: Props) {
             </tbody>
           </table>
         ) : (
-          <p className="ops-empty">Todavía no hay archivos de {title.toLowerCase()} en el índice.</p>
+          <p className="ops-empty">
+            Hoy todavía no aterrizó ningún archivo de {title.toLowerCase()}.
+          </p>
         )}
       </section>
 
@@ -152,7 +145,7 @@ export function LayerView({ layer, title }: Props) {
           </table>
         ) : (
           <p className="ops-empty">
-            {state === null || !state.listedAt
+            {!tree?.loaded
               ? 'Cargando el índice…'
               : needle
                 ? `Ningún día contiene "${needle}".`

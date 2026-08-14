@@ -9,17 +9,9 @@ import type { AppEnv } from './env'
  * en el .env no existe ninguna otra credencial.
  *
  * La app lo toca en exactamente dos lugares: el viewer (bajar UN archivo,
- * volátil) y el Full sync (el escaneo manual que repara el índice).
+ * volátil) y el catálogo de eventos (un JSON declarado). El resto se lee
+ * del índice en Firestore, nunca del bucket.
  */
-
-export interface RemoteObject {
-  key: string
-  size: number
-  /** Partición diaria a la que pertenece, si la key la declara. */
-  date: IsoDate | null
-  /** Instante de creación del objeto, ISO en UTC: el aterrizaje real. */
-  lastModified: string | null
-}
 
 let client: Storage | null = null
 
@@ -42,27 +34,6 @@ export function layerPrefix(env: AppEnv, layer: LayerId): string {
 /** El prefijo de UNA partición diaria de la capa. */
 export function dayPrefix(env: AppEnv, layer: LayerId, day: IsoDate): string {
   return `${layerPrefix(env, layer)}${env.lake.datePartitionKey}=${day}/`
-}
-
-/** Lista un prefijo completo, paginando (mil claves por página). */
-export async function listPrefix(env: AppEnv, prefix: string): Promise<RemoteObject[]> {
-  const datePattern = new RegExp(`${env.lake.datePartitionKey}=(\\d{4}-\\d{2}-\\d{2})`)
-  const bucket = lakeClient(env).bucket(env.lake.bucket)
-  const out: RemoteObject[] = []
-
-  const [files] = await bucket.getFiles({ prefix })
-  for (const file of files) {
-    const size = Number(file.metadata.size ?? 0)
-    // Las "carpetas" de la consola son objetos de tamaño 0: no son datos.
-    if (!file.name || !size) continue
-    out.push({
-      key: file.name,
-      size,
-      date: file.name.match(datePattern)?.[1] ?? null,
-      lastModified: file.metadata.timeCreated ?? null,
-    })
-  }
-  return out
 }
 
 /** El cuerpo de un objeto como texto, EN MEMORIA — nada toca el disco. */

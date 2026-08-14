@@ -5,8 +5,8 @@ import { join } from 'node:path'
 import { SAMPLE_ROW_CAP } from '@shared/config'
 import type { FileSample, FileSampleQuery } from '@shared/types'
 import { query, sqlString } from './duckdb'
-import { loadEnv } from '../env'
-import { dayPrefix, getObjectBytes } from '../lake'
+import { loadEnv } from '../../env'
+import { dayPrefix, getObjectBytes } from '../../lake'
 
 /**
  * El viewer de UN archivo. Es la única parte de la app que toca DATA del
