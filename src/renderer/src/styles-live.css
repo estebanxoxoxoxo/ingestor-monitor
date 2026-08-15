@@ -478,8 +478,9 @@
   transition: r 0.12s ease;
 }
 
-/* El anillo aparece sólo al interactuar; sobre un punto de 3 px, siempre
-   visible sería más ruido que información. */
+/* El anillo aparece SÓLO en el punto seleccionado: es la marca de "este
+   estás mirando", y nada más. Al apuntar con el mouse alcanza con que el
+   punto crezca — un anillo ahí se confunde con una selección. */
 .dot-ring {
   fill: none;
   stroke: var(--live-accent);
@@ -510,11 +511,6 @@
 
 .map-dot.hovered .dot-core {
   r: 3;
-}
-
-.map-dot.hovered .dot-ring {
-  opacity: 0.9;
-  stroke-width: 1.5;
 }
 
 .map-dot.selected .dot-ring {

@@ -30,7 +30,8 @@ interface Props {
   hoveredId: string | null
   selectedId: string | null
   onHover: (id: string | null) => void
-  onSelect: (id: string) => void
+  /** null = se deseleccionó (click en el mapa, fuera de todo punto). */
+  onSelect: (id: string | null) => void
 }
 
 export function WorldMap({ tabs, hoveredId, selectedId, onHover, onSelect }: Props) {
@@ -131,8 +132,17 @@ export function WorldMap({ tabs, hoveredId, selectedId, onHover, onSelect }: Pro
 
   return (
     <div className="map-wrap" ref={wrapRef}>
+      {/* El onClick del svg deselecciona: cualquier click que no sea sobre un
+          punto (los puntos cortan la propagación). Arrastrar para desplazar no
+          cuenta — d3-zoom suprime el click que sigue a un arrastre. */}
       {geometry && (
-        <svg ref={svgRef} width={width} height={height} className="map-svg">
+        <svg
+          ref={svgRef}
+          width={width}
+          height={height}
+          className="map-svg"
+          onClick={() => onSelect(null)}
+        >
           <defs>
             <radialGradient id="ocean-glow" cx="50%" cy="45%" r="70%">
               <stop offset="0%" stopColor="#16233a" />
@@ -169,7 +179,10 @@ export function WorldMap({ tabs, hoveredId, selectedId, onHover, onSelect }: Pro
                   transform={`translate(${screenX},${screenY})`}
                   onMouseEnter={() => onHover(tab.id)}
                   onMouseLeave={() => onHover(null)}
-                  onClick={() => onSelect(tab.id)}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    onSelect(tab.id)
+                  }}
                 >
                   <circle className="dot-hit" r={12} />
                   <circle className="dot-ping" r={1.5} />
