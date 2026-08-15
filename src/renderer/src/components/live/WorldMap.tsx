@@ -6,8 +6,8 @@ import 'd3-transition'
 import { zoom as createZoom, zoomIdentity } from 'd3-zoom'
 import type { ZoomBehavior, ZoomTransform } from 'd3-zoom'
 import { feature } from 'topojson-client'
-import type { LiveSession } from '@shared/types'
-import { formatDuration } from '../../lib/format'
+import type { LiveTab } from '@shared/types'
+import { formatDuration, secondsSince } from '../../lib/format'
 import worldAtlas from 'world-atlas/countries-110m.json'
 
 /**
@@ -26,14 +26,14 @@ const countries = feature(topology, topology.objects.countries as never) as unkn
 const ZOOM_RANGE: [number, number] = [1, 14]
 
 interface Props {
-  sessions: LiveSession[]
+  tabs: LiveTab[]
   hoveredId: string | null
   selectedId: string | null
   onHover: (id: string | null) => void
   onSelect: (id: string) => void
 }
 
-export function WorldMap({ sessions, hoveredId, selectedId, onHover, onSelect }: Props) {
+export function WorldMap({ tabs, hoveredId, selectedId, onHover, onSelect }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
   const zoomRef = useRef<ZoomBehavior<SVGSVGElement, unknown> | null>(null)
@@ -104,33 +104,30 @@ export function WorldMap({ sessions, hoveredId, selectedId, onHover, onSelect }:
   }
 
   /**
-   * Un punto por sesión. Dos sesiones en la misma ciudad caen en la misma
-   * coordenada, así que las repetidas se abren en espiral: siguen siendo
-   * clickeables por separado, que es lo que hace que un punto sea una sesión.
+   * Un punto por pestaña, SIEMPRE en su coordenada real: desplazarlos para que
+   * no se tapen mentiría sobre dónde está cada uno. Las de la misma ciudad se
+   * superponen y se ven como uno solo.
    */
   const points = useMemo(() => {
     if (!geometry) return []
-    const seen = new Map<string, number>()
-    return sessions.flatMap((session) => {
-      if (!session.located) return []
-      const projected = geometry.projection([session.geo.lng as number, session.geo.lat as number])
+    return tabs.flatMap((tab) => {
+      if (!tab.located) return []
+      const projected = geometry.projection([tab.geo.lng as number, tab.geo.lat as number])
       if (!projected) return []
-      const key = `${session.geo.lat?.toFixed(2)},${session.geo.lng?.toFixed(2)}`
-      const index = seen.get(key) ?? 0
-      seen.set(key, index + 1)
-      const angle = index * 2.399963 // ángulo áureo: reparte parejo
-      const radius = index === 0 ? 0 : 7 + index * 1.8
-      return [
-        {
-          session,
-          x: projected[0] + Math.cos(angle) * radius,
-          y: projected[1] + Math.sin(angle) * radius,
-        },
-      ]
+      return [{ tab, x: projected[0], y: projected[1] }]
     })
-  }, [sessions, geometry])
+  }, [tabs, geometry])
 
-  const hovered = points.find((p) => p.session.id === hoveredId) ?? null
+  const hovered = points.find((p) => p.tab.id === hoveredId) ?? null
+
+  /**
+   * Apilados, el último que se dibuja es el que se ve y el que recibe el
+   * click: el elegido y el apuntado van al final para no quedar debajo.
+   */
+  const drawOrder = useMemo(() => {
+    const depth = (id: string): number => (id === selectedId ? 2 : id === hoveredId ? 1 : 0)
+    return [...points].sort((a, b) => depth(a.tab.id) - depth(b.tab.id))
+  }, [points, hoveredId, selectedId])
 
   return (
     <div className="map-wrap" ref={wrapRef}>
@@ -155,24 +152,24 @@ export function WorldMap({ sessions, hoveredId, selectedId, onHover, onSelect }:
           {/* Los puntos van fuera del grupo escalado para que su tamaño no
               dependa del zoom: se posicionan a mano con la misma transformada. */}
           <g className="map-dots">
-            {points.map(({ session, x, y }) => {
+            {drawOrder.map(({ tab, x, y }) => {
               const screenX = x * transform.k + transform.x
               const screenY = y * transform.k + transform.y
               const state = [
                 'map-dot',
-                session.id === selectedId ? 'selected' : '',
-                session.id === hoveredId ? 'hovered' : '',
+                tab.id === selectedId ? 'selected' : '',
+                tab.id === hoveredId ? 'hovered' : '',
               ]
                 .filter(Boolean)
                 .join(' ')
               return (
                 <g
-                  key={session.id}
+                  key={tab.id}
                   className={state}
                   transform={`translate(${screenX},${screenY})`}
-                  onMouseEnter={() => onHover(session.id)}
+                  onMouseEnter={() => onHover(tab.id)}
                   onMouseLeave={() => onHover(null)}
-                  onClick={() => onSelect(session.id)}
+                  onClick={() => onSelect(tab.id)}
                 >
                   <circle className="dot-hit" r={12} />
                   <circle className="dot-ping" r={1.5} />
@@ -193,11 +190,11 @@ export function WorldMap({ sessions, hoveredId, selectedId, onHover, onSelect }:
             top: hovered.y * transform.k + transform.y,
           }}
         >
-          <strong>{hovered.session.geo.city ?? 'Sin ciudad'}</strong>
+          <strong>{hovered.tab.geo.city ?? 'Sin ciudad'}</strong>
           <span>
-            {hovered.session.geo.country} · {hovered.session.eventCount}{' '}
-            {hovered.session.eventCount === 1 ? 'evento' : 'eventos'} ·{' '}
-            {formatDuration(hovered.session.engagedTimeSec)}
+            {hovered.tab.geo.country} · {hovered.tab.eventCount}{' '}
+            {hovered.tab.eventCount === 1 ? 'evento' : 'eventos'} ·{' '}
+            {formatDuration(secondsSince(hovered.tab.startedAt))}
           </span>
         </div>
       )}

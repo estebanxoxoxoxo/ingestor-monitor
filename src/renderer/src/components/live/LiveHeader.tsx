@@ -37,7 +37,6 @@ interface Props {
  * números y los cuadros nunca se corren de lugar cuando cambian los valores.
  */
 export function LiveHeader({ snapshot, catalog, groups, declared }: Props) {
-  const sessions = snapshot?.sessions ?? []
   const { relevant, loading, error, save } = useRelevantEvents()
   const [picking, setPicking] = useState(false)
 
@@ -85,6 +84,7 @@ export function LiveHeader({ snapshot, catalog, groups, declared }: Props) {
 
   const relevantTotal = relevant.reduce((acc, name) => acc + (counts.get(name) ?? 0), 0)
   const totalEvents = snapshot?.totalEvents ?? 0
+  const tabCount = snapshot?.tabs.length ?? 0
   const relevantShare = totalEvents > 0 ? Math.round((relevantTotal / totalEvents) * 100) : 0
 
   return (
@@ -92,14 +92,23 @@ export function LiveHeader({ snapshot, catalog, groups, declared }: Props) {
       <section className="live-zone zone-hero">
         <span className="zone-title">
           <span className="live-pulse" aria-hidden="true" />
-          Sesiones ahora
+          Personas ahora
         </span>
-        <span className="live-hero-value">{sessions.length}</span>
+        <span className="live-hero-value">{snapshot?.people ?? 0}</span>
       </section>
 
       <section className="live-zone zone-stats">
         <dl className="live-stats">
-          <Stat label="Conexiones" value={snapshot?.connections ?? 0} />
+          <Stat
+            label="Pestañas"
+            value={tabCount}
+            title="Cada pestaña abierta es una fila. Si son más que las personas, alguien tiene dos abiertas."
+          />
+          <Stat
+            label="Mirando"
+            value={snapshot?.watching ?? 0}
+            title="Pestañas con la página al frente. El resto quedó abierta y la persona está en otra cosa."
+          />
           <Stat label="Eventos" value={totalEvents} />
           <Stat
             label="Eventos relevantes"
@@ -124,7 +133,7 @@ export function LiveHeader({ snapshot, catalog, groups, declared }: Props) {
           columns={group.columns}
           events={all.filter((event) => event.group === group.name)}
           counts={counts}
-          sessions={sessions.length}
+          tabs={tabCount}
         />
       ))}
 
@@ -134,7 +143,7 @@ export function LiveHeader({ snapshot, catalog, groups, declared }: Props) {
           columns={Math.max(1, Math.ceil(ungrouped.length / 3))}
           events={ungrouped}
           counts={counts}
-          sessions={sessions.length}
+          tabs={tabCount}
           warning={
             declared
               ? undefined
@@ -165,7 +174,7 @@ export function LiveHeader({ snapshot, catalog, groups, declared }: Props) {
               key={name}
               event={definitions.get(name) ?? { name, label: name, group: null, values: [] }}
               count={counts.get(name) ?? 0}
-              sessions={sessions.length}
+              tabs={tabCount}
             />
           ))}
           {error && <span className="zone-error">{error}</span>}
@@ -193,14 +202,14 @@ function EventZone({
   columns,
   events,
   counts,
-  sessions,
+  tabs,
   warning,
 }: {
   title: string
   columns: number
   events: EventDefinition[]
   counts: Map<string, number>
-  sessions: number
+  tabs: number
   warning?: string
 }) {
   return (
@@ -230,7 +239,7 @@ function EventZone({
             key={event.name}
             event={event}
             count={counts.get(event.name) ?? 0}
-            sessions={sessions}
+            tabs={tabs}
           />
         ))}
       </div>
@@ -239,35 +248,35 @@ function EventZone({
 }
 
 /**
- * El número es el PROMEDIO por sesión abierta, no el total. Un total crudo
- * sube solo porque hay más gente; el promedio dice cuánto hace cada uno.
+ * El número es el PROMEDIO por pestaña abierta, no el total. Un total crudo
+ * sube solo porque hay más gente; el promedio dice cuánto hace cada una.
  * El total queda en el tooltip para no perder la magnitud.
  */
 function EventBox({
   event,
   count,
-  sessions,
+  tabs,
 }: {
   event: EventDefinition
   count: number
-  sessions: number
+  tabs: number
 }) {
   return (
     <span
       className={count > 0 ? 'live-event active' : 'live-event'}
       role="listitem"
-      title={`${event.name} · ${count} en ${sessions} ${sessions === 1 ? 'sesión' : 'sesiones'}`}
+      title={`${event.name} · ${count} en ${tabs} ${tabs === 1 ? 'pestaña' : 'pestañas'}`}
     >
       <span className="live-event-name">{event.label}</span>
-      <span className="live-event-count">{perSession(count, sessions)}</span>
+      <span className="live-event-count">{perTab(count, tabs)}</span>
     </span>
   )
 }
 
 /** Sin decimales cuando da redondo; con uno cuando no. */
-function perSession(count: number, sessions: number): string {
-  if (sessions === 0 || count === 0) return '0'
-  const average = count / sessions
+function perTab(count: number, tabs: number): string {
+  if (tabs === 0 || count === 0) return '0'
+  const average = count / tabs
   return Number.isInteger(average) ? String(average) : average.toFixed(1)
 }
 

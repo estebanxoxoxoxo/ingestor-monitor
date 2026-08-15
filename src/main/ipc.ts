@@ -222,8 +222,7 @@ export function registerIpc(): void {
 
   ipcMain.handle(
     IPC.liveEvent,
-    (_event, connectionId: string, eventId: string): unknown =>
-      getLiveEvent(connectionId, eventId),
+    (_event, tabId: string, eventId: string): unknown => getLiveEvent(tabId, eventId),
   )
 }
 

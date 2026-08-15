@@ -21,6 +21,18 @@ export function formatUtcStamp(iso: string): string {
   return `${text.slice(0, 10)} ${text.slice(11, 19)} UTC`
 }
 
+/**
+ * Segundos transcurridos desde un instante ISO hasta AHORA. Se recalcula en
+ * cada render, así que con el ticker de un segundo el número sube solo — a
+ * diferencia del tiempo comprometido, que sólo avanza cuando llega un evento.
+ * 0 si no hay fecha, o si viene del futuro (reloj del cliente adelantado).
+ */
+export function secondsSince(iso: string | null): number {
+  if (!iso) return 0
+  const seconds = (Date.now() - Date.parse(iso)) / 1000
+  return Number.isFinite(seconds) && seconds > 0 ? Math.floor(seconds) : 0
+}
+
 /** Duración compacta: 45s, 12m 30s, 1h 04m. */
 export function formatDuration(seconds: number): string {
   const total = Math.max(0, Math.round(seconds))

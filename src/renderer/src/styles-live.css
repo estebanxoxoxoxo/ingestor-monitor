@@ -633,9 +633,9 @@
   color: var(--error);
 }
 
-/* ── Lista de sesiones ──────────────────────────────────────── */
+/* ── Lista de pestañas ──────────────────────────────────────── */
 
-.session-list {
+.tab-list {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
@@ -644,7 +644,7 @@
   list-style: none;
 }
 
-.session-item {
+.tab-item {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -660,18 +660,18 @@
   cursor: pointer;
 }
 
-.session-item.hovered {
+.tab-item.hovered {
   background: #1a2330;
   border-left-color: var(--live-accent);
 }
 
-.session-item.selected {
+.tab-item.selected {
   background: #1a2330;
   border-left-color: #fff;
 }
 
 /* El mismo punto que en el mapa: es el mismo objeto. */
-.session-dot {
+.tab-dot {
   width: 3px;
   height: 3px;
   flex-shrink: 0;
@@ -680,7 +680,7 @@
   box-shadow: 0 0 8px rgb(255 200 87 / 50%);
 }
 
-.session-main {
+.tab-main {
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -688,7 +688,7 @@
   flex: 1;
 }
 
-.session-place {
+.tab-place {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -699,7 +699,7 @@
   text-overflow: ellipsis;
 }
 
-.session-place em {
+.tab-place em {
   font-style: normal;
   font-size: 10px;
   font-weight: 600;
@@ -709,14 +709,14 @@
   padding: 1px 4px;
 }
 
-.session-tag {
+.tab-tag {
   font-size: 9px;
   text-transform: uppercase;
   letter-spacing: 0.4px;
   color: var(--warn);
 }
 
-.session-page {
+.tab-page {
   font-size: 11px;
   color: var(--text-dim);
   font-family: "Cascadia Mono", Consolas, monospace;
@@ -725,7 +725,7 @@
   text-overflow: ellipsis;
 }
 
-.session-meta {
+.tab-meta {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
@@ -735,34 +735,32 @@
   font-variant-numeric: tabular-nums;
 }
 
-.session-events {
+.tab-events {
   font-weight: 700;
   color: var(--text);
 }
 
-.session-tabs {
-  font-size: 10px;
-  font-weight: 700;
-  color: var(--text-dim);
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  padding: 1px 4px;
+/* Atención: la página está al frente. Es lo único que separa a alguien
+   mirando de una pestaña olvidada de fondo — acá iba un "hace 12s" que sólo
+   decía cuándo se escribió el nodo por última vez. */
+.tab-watching.on {
+  color: var(--live-accent);
 }
 
-.session-list-empty {
+.tab-list-empty {
   padding: 28px 20px;
   font-size: 12px;
   line-height: 1.6;
   color: var(--text-dim);
 }
 
-.session-list-empty .dim {
+.tab-list-empty .dim {
   opacity: 0.65;
 }
 
-/* ── Detalle de sesión ──────────────────────────────────────── */
+/* ── Detalle de una pestaña ─────────────────────────────────── */
 
-.session-detail {
+.tab-detail {
   display: flex;
   flex-direction: column;
   flex: 1;

@@ -1,14 +1,7 @@
 import { getDatabase } from 'firebase-admin/database'
 import type { Reference } from 'firebase-admin/database'
 import { LIVE_SESSIONS_PATH } from '@shared/config'
-import type {
-  LiveConnection,
-  LiveEvent,
-  LiveEventValue,
-  LiveGeo,
-  LiveSession,
-  LiveSnapshot,
-} from '@shared/types'
+import type { LiveEvent, LiveEventValue, LiveGeo, LiveSnapshot, LiveTab } from '@shared/types'
 import { firebaseApp } from '../firebase'
 
 export type LiveListener = (snapshot: LiveSnapshot) => void
@@ -34,10 +27,10 @@ let latest: LiveSnapshot | null = null
 let latestRaw: unknown = null
 
 /** El evento tal cual vino de la RTDB, o null si ya no está. */
-export function getLiveEvent(connectionId: string, eventId: string): unknown | null {
+export function getLiveEvent(tabId: string, eventId: string): unknown | null {
   const node = asRecord(latestRaw)
-  const connection = asRecord(node[connectionId])
-  const events = asRecord(connection.events)
+  const tab = asRecord(node[tabId])
+  const events = asRecord(tab.events)
   return events[eventId] ?? null
 }
 
@@ -102,8 +95,9 @@ function emitNow(snapshot: LiveSnapshot): void {
 // ── Normalización ──────────────────────────────────────────────
 
 const emptySnapshot = (error?: string): LiveSnapshot => ({
-  sessions: [],
-  connections: 0,
+  tabs: [],
+  people: 0,
+  watching: 0,
   eventTotals: [],
   totalEvents: 0,
   receivedAt: new Date().toISOString(),
@@ -164,7 +158,7 @@ function displayValue(raw: unknown): number | string | null {
   return null
 }
 
-function parseEvents(connectionId: string, raw: unknown): LiveEvent[] {
+function parseEvents(tabId: string, raw: unknown): LiveEvent[] {
   return Object.entries(asRecord(raw))
     .map(([id, value]) => {
       const event = asRecord(value)
@@ -176,7 +170,7 @@ function parseEvents(connectionId: string, raw: unknown): LiveEvent[] {
 
       return {
         id,
-        connectionId,
+        tabId,
         name: asString(event.event) ?? '(sin nombre)',
         at: asString(options.originalTimestamp),
         engagedTimeSec: asNumber(suite.engaged_time_sec),
@@ -186,106 +180,55 @@ function parseEvents(connectionId: string, raw: unknown): LiveEvent[] {
     .sort((a, b) => (b.at ?? '').localeCompare(a.at ?? ''))
 }
 
-function parseConnection(id: string, raw: unknown): LiveConnection {
+/** Un nodo, una pestaña. Nada se fusiona con nada. */
+function parseTab(id: string, raw: unknown): LiveTab {
   const entry = asRecord(raw)
+  const events = parseEvents(id, entry.events)
+  const eventsByName: Record<string, number> = {}
+  for (const event of events) eventsByName[event.name] = (eventsByName[event.name] ?? 0) + 1
+  const geo = parseGeo(entry.geo)
+
   return {
     id,
-    sessionId: asString(entry.session_id),
     anonymousId: asString(entry.anonymous_id),
+    sessionId: asString(entry.session_id),
     page: asString(entry.page),
     startedAt: asString(entry.started_at),
+    // Ausente = pestaña vieja o nodo a medio escribir: se asume al frente,
+    // que es como estaba antes de que el campo existiera.
+    visible: entry.visible !== false,
     lastSeen: asString(entry.last_seen),
     engagedTimeSec: asNumber(entry.engaged_time_sec) ?? 0,
-    geo: parseGeo(entry.geo),
-    events: parseEvents(id, entry.events),
+    eventCount: events.length,
+    eventsByName,
+    events,
+    geo,
+    located: geo.lat !== null && geo.lng !== null,
   }
-}
-
-/**
- * Dos pestañas son dos conexiones y una sola sesión. Se agrupa por
- * `session_id`; si falta, por `anonymous_id`; y si tampoco está, la conexión
- * queda sola — que es lo más honesto: sin identificador no hay forma de saber
- * que dos pestañas son la misma persona.
- */
-function groupIntoSessions(connections: LiveConnection[]): LiveSession[] {
-  const groups = new Map<string, { by: LiveSession['groupedBy']; items: LiveConnection[] }>()
-
-  for (const connection of connections) {
-    const key = connection.sessionId
-      ? `s:${connection.sessionId}`
-      : connection.anonymousId
-        ? `a:${connection.anonymousId}`
-        : `c:${connection.id}`
-    const by: LiveSession['groupedBy'] = connection.sessionId
-      ? 'session_id'
-      : connection.anonymousId
-        ? 'anonymous_id'
-        : 'connection'
-    const group = groups.get(key) ?? { by, items: [] }
-    group.items.push(connection)
-    groups.set(key, group)
-  }
-
-  return [...groups.entries()].map(([key, group]) => {
-    const items = group.items
-    const eventsByName: Record<string, number> = {}
-    let eventCount = 0
-    for (const connection of items) {
-      for (const event of connection.events) {
-        eventsByName[event.name] = (eventsByName[event.name] ?? 0) + 1
-        eventCount++
-      }
-    }
-
-    // La geo puede faltar en una pestaña y estar en otra: gana la que tenga
-    // coordenadas.
-    const geo = items.find((c) => c.geo.lat !== null && c.geo.lng !== null)?.geo ?? items[0].geo
-    const newest = items.reduce((a, b) => ((a.lastSeen ?? '') >= (b.lastSeen ?? '') ? a : b))
-
-    return {
-      id: key.slice(2),
-      groupedBy: group.by,
-      anonymousId: items.find((c) => c.anonymousId)?.anonymousId ?? null,
-      connections: items,
-      page: newest.page,
-      startedAt: items
-        .map((c) => c.startedAt)
-        .filter((v): v is string => Boolean(v))
-        .sort()[0] ?? null,
-      lastSeen: newest.lastSeen,
-      // Tiempo comprometido: el mayor de las pestañas, no la suma. Una persona
-      // con dos pestañas abiertas no estuvo el doble de tiempo.
-      engagedTimeSec: Math.max(...items.map((c) => c.engagedTimeSec)),
-      eventCount,
-      eventsByName,
-      geo,
-      located: geo.lat !== null && geo.lng !== null,
-    }
-  })
 }
 
 export function buildSnapshot(value: unknown): LiveSnapshot {
-  const connections = Object.entries(asRecord(value)).map(([id, raw]) =>
-    parseConnection(id, raw),
-  )
-  const sessions = groupIntoSessions(connections).sort((a, b) =>
-    (b.lastSeen ?? '').localeCompare(a.lastSeen ?? ''),
-  )
+  const tabs = Object.entries(asRecord(value))
+    .map(([id, raw]) => parseTab(id, raw))
+    .sort((a, b) => (b.lastSeen ?? '').localeCompare(a.lastSeen ?? ''))
 
   const totals = new Map<string, number>()
-  for (const session of sessions) {
-    for (const [name, count] of Object.entries(session.eventsByName)) {
+  for (const tab of tabs) {
+    for (const [name, count] of Object.entries(tab.eventsByName)) {
       totals.set(name, (totals.get(name) ?? 0) + count)
     }
   }
 
   return {
-    sessions,
-    connections: connections.length,
+    tabs,
+    // Las personas son un número, no una entidad: la pestaña sin
+    // `anonymous_id` cuenta sola, porque no se puede afirmar que sea otra.
+    people: new Set(tabs.map((tab) => tab.anonymousId ?? `tab:${tab.id}`)).size,
+    watching: tabs.filter((tab) => tab.visible).length,
     eventTotals: [...totals]
       .map(([name, count]) => ({ name, count }))
       .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)),
-    totalEvents: sessions.reduce((acc, s) => acc + s.eventCount, 0),
+    totalEvents: tabs.reduce((acc, tab) => acc + tab.eventCount, 0),
     receivedAt: new Date().toISOString(),
   }
 }

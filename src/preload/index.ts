@@ -30,8 +30,8 @@ const api: RendererApi = {
   saveSettings: (settings: AppSettings): Promise<SettingsResult> =>
     ipcRenderer.invoke(IPC.settingsSave, settings),
 
-  getLiveEvent: (connectionId: string, eventId: string): Promise<unknown | null> =>
-    ipcRenderer.invoke(IPC.liveEvent, connectionId, eventId),
+  getLiveEvent: (tabId: string, eventId: string): Promise<unknown | null> =>
+    ipcRenderer.invoke(IPC.liveEvent, tabId, eventId),
 
   subscribeTree: (callback: (snapshot: TreeSnapshot) => void): (() => void) => {
     const listener = (_event: IpcRendererEvent, snapshot: TreeSnapshot): void =>

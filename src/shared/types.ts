@@ -19,7 +19,7 @@ export interface RendererApi {
    * El evento tal cual vino de la RTDB. Se pide al abrir el detalle en vez de
    * viajar en cada snapshot: sólo se mira uno por vez.
    */
-  getLiveEvent(connectionId: string, eventId: string): Promise<unknown | null>
+  getLiveEvent(tabId: string, eventId: string): Promise<unknown | null>
 
   /** El árbol de las dos capas, mergeado (hoy vivo + historia). Devuelve el des-suscriptor. */
   subscribeTree(callback: (snapshot: TreeSnapshot) => void): () => void
@@ -310,8 +310,13 @@ export interface GcpUsage {
 
 // ── En vivo ────────────────────────────────────────────────────
 // Espejo de /activeSessions en la Realtime Database. Cada clave del nodo es
-// una CONEXIÓN (una pestaña); varias conexiones con el mismo session_id son
-// una sola SESIÓN. Firebase borra la entrada cuando el cliente se desconecta.
+// una PESTAÑA abierta, y acá se refleja tal cual: una fila por nodo, sin
+// fusionar. Firebase la borra cuando el navegador se desconecta.
+//
+// Las personas no son una entidad, son un NÚMERO: `people` cuenta
+// `anonymous_id` distintos. Agrupar pestañas en sesiones obligaba a inventar
+// una regla de fusión por cada dato (¿el mayor tiempo o la suma?, ¿qué geo
+// gana?) y hacía que la lista se reordenara sola cuando el id llegaba tarde.
 
 export interface LiveGeo {
   city: string | null
@@ -328,8 +333,8 @@ export interface LiveEventValue {
 
 export interface LiveEvent {
   id: string
-  /** Conexión que lo emitió: hace falta para pedir el crudo. */
-  connectionId: string
+  /** Pestaña que lo emitió: hace falta para pedir el crudo. */
+  tabId: string
   name: string
   /** originalTimestamp del evento, ISO en UTC. */
   at: string | null
@@ -337,40 +342,42 @@ export interface LiveEvent {
   values: LiveEventValue[]
 }
 
-export interface LiveConnection {
-  /** Clave del nodo en la RTDB. */
+/** Una pestaña abierta: un nodo de la RTDB, sin fusionar con ningún otro. */
+export interface LiveTab {
+  /** Clave del nodo. Un solo significado, siempre. */
   id: string
+  /** El navegador. Dos pestañas de la misma persona lo comparten. */
+  anonymousId: string | null
   sessionId: string | null
-  anonymousId: string | null
   page: string | null
   startedAt: string | null
-  lastSeen: string | null
-  engagedTimeSec: number
-  geo: LiveGeo
-  events: LiveEvent[]
-}
-
-export interface LiveSession {
-  /** session_id si lo hay; si no, la clave de la conexión. */
-  id: string
-  /** Cómo se agruparon las conexiones. */
-  groupedBy: 'session_id' | 'anonymous_id' | 'connection'
-  anonymousId: string | null
-  connections: LiveConnection[]
-  page: string | null
-  startedAt: string | null
+  /**
+   * La pestaña está al frente. Lo escribe la suite en el instante en que
+   * cambia (`visibilitychange`): es el único dato que distingue a alguien
+   * mirando de una pestaña olvidada de fondo.
+   */
+  visible: boolean
+  /** Cuándo se escribió el nodo por última vez. NO mide presencia: sin
+   * latido, quien lee sin tocar nada no escribe. Presente es estar acá. */
   lastSeen: string | null
   engagedTimeSec: number
   eventCount: number
   eventsByName: Record<string, number>
+  events: LiveEvent[]
   geo: LiveGeo
   /** Tiene coordenadas y por lo tanto punto en el mapa. */
   located: boolean
 }
 
 export interface LiveSnapshot {
-  sessions: LiveSession[]
-  connections: number
+  tabs: LiveTab[]
+  /**
+   * Cuántas PERSONAS: `anonymous_id` distintos. La pestaña que todavía no lo
+   * tiene cuenta como una — no se puede afirmar que sea la misma que otra.
+   */
+  people: number
+  /** Cuántas pestañas tienen la página al frente. */
+  watching: number
   eventTotals: { name: string; count: number }[]
   totalEvents: number
   receivedAt: string
