@@ -576,6 +576,37 @@ body {
   text-overflow: ellipsis;
 }
 
+/*
+ * LA GRILLA DE UNA CAPA. Las dos tablas de Raw y Bronze —el log de hoy y el
+ * árbol de días— comparten estas medidas para que sus columnas caigan en la
+ * misma vertical. Sin `fixed`, cada tabla se acomoda a SU contenido: las dos
+ * quedan distintas entre sí, y encima Raw y Bronze quedan distintas entre
+ * ellas porque los nombres de archivo no miden lo mismo.
+ *
+ * Cuatro columnas en las dos, aunque el árbol no use la última: si tuviera
+ * tres, "Tamaño" caería en otro lugar.
+ */
+.layer-table {
+  table-layout: fixed;
+}
+
+.layer-table .col-when {
+  width: 220px;
+}
+
+.layer-table .col-size {
+  width: 130px;
+}
+
+.layer-table .col-action {
+  width: 70px;
+}
+
+/* El nombre lo limita su columna, no un ancho suelto. */
+.layer-table .ops-file {
+  max-width: none;
+}
+
 .ops-empty {
   margin: 0;
   font-size: 12px;

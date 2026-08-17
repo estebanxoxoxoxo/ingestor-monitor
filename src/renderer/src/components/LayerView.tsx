@@ -69,7 +69,15 @@ export function LayerView({ layer, title, tree }: Props) {
       <section className="ops-panel">
         <h2 className="ops-title">Ingestado hoy (UTC) · log</h2>
         {entries.length > 0 ? (
-          <table className="ops-table striped">
+          <table className="ops-table striped layer-table">
+            {/* La misma grilla que el árbol de abajo: las columnas de las dos
+                tablas tienen que caer en la misma vertical. */}
+            <colgroup>
+              <col className="col-when" />
+              <col />
+              <col className="col-size" />
+              <col className="col-action" />
+            </colgroup>
             <thead>
               <tr>
                 <th>Subido</th>
@@ -120,12 +128,21 @@ export function LayerView({ layer, title, tree }: Props) {
         </div>
 
         {days.length > 0 ? (
-          <table className="ops-table striped">
+          <table className="ops-table striped layer-table">
+            {/* La cuarta columna no lleva dato: existe para que "Tamaño" caiga
+                donde cae en el log de arriba. */}
+            <colgroup>
+              <col className="col-when" />
+              <col />
+              <col className="col-size" />
+              <col className="col-action" />
+            </colgroup>
             <thead>
               <tr>
                 <th>Día</th>
                 <th>Archivos</th>
                 <th>Tamaño</th>
+                <th aria-hidden="true" />
               </tr>
             </thead>
             <tbody>
@@ -139,6 +156,7 @@ export function LayerView({ layer, title, tree }: Props) {
                   <td>{entry.date}</td>
                   <td>{entry.files}</td>
                   <td>{formatBytes(entry.bytes)}</td>
+                  <td />
                 </tr>
               ))}
             </tbody>
