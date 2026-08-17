@@ -12,19 +12,22 @@ donantes de código y quedan para retirar; la carpeta
 
 ## Pestañas
 
-**Vivo ●** — las sesiones abiertas ahora mismo (Realtime Database):
-planisferio, sesiones, detalle de eventos. El punto rojo titila porque es
-una transmisión. Labels y grupos salen de `schemas/event-types.json` del
-lake — el catálogo que la suite publica desde sus propios enums (behavior +
-business) con `npm run publish:event-types` en el repo de la landing.
+**Vivo ●** — las pestañas abiertas ahora mismo (Realtime Database):
+planisferio, lista de pestañas y detalle de eventos. **No hay noción de
+sesión**: cada pestaña abierta es un nodo y desaparece sola al cerrarse;
+**Personas ahora** las agrupa por `anonymous_id` y **Mirando** cuenta las
+que tienen la página al frente. El punto rojo titila porque es una
+transmisión. Labels y grupos salen de `schemas/event-types.json` del lake —
+el catálogo que la suite publica desde sus propios enums (behavior +
+business) con `npm run publish:event-types` en el repo `events-suite`.
 
 **Raw** y **Bronze** — navegadores del lake, cada una con su punto de
 frescura (verde = data de HOY UTC; naranja = de ayer a 6 días; violeta =
-una semana o más; rojo = nunca — días de calendario, jamás ventanas
-móviles). Arriba, el **log de lo que aterrizó hoy** (UTC, en vivo por la
-suscripción), con **Ver** que abre la vista previa del archivo. Abajo, el
-árbol para la historia: días con
-buscador → click en un día → sus **archivos** (nombre, peso y fecha) →
+una semana o más; negro = nunca entró nada — días de calendario, jamás
+ventanas móviles). Arriba, el **log de lo que aterrizó hoy** (UTC, en vivo
+por la suscripción), con **Ver** que abre la vista previa del archivo.
+Abajo, el árbol para la historia: días con buscador → click en un día →
+sus **archivos** (nombre, peso y fecha) →
 click en un nombre → el **viewer de ese archivo**, bajado de GCS al
 momento a un temporal que DuckDB lee y se borra al instante — en raw una
 fila por request HTTP, en bronze una por evento, con **Ver** por registro.
@@ -57,32 +60,55 @@ El índice del bucket vive en Firestore como relación de colecciones —
 y **sólo hechos**: nada derivado. Los totales por día se piden con
 agregaciones del lado del servidor (viajan números, no documentos).
 
-Lo alimenta **exclusivamente la función `index-writer`** (Cloud Functions;
-carpeta `infra/`, deploy con `npm run infra:index`) desde las
-notificaciones Pub/Sub del bucket: cada archivo que aterriza está en el
-índice en segundos, con la app cerrada. **La app tiene UNA sola fuente:
-Firebase** — se suscribe (`onSnapshot` de HOY) y lee días y archivos de
-Firestore; jamás lista el bucket por su cuenta. **La app ya ni siquiera
+Lo alimenta **exclusivamente la función `index-writer`** (Cloud Functions
+gen2) desde las notificaciones Pub/Sub del bucket: cada archivo que aterriza
+está en el índice en segundos, con la app cerrada. **La app tiene UNA sola
+fuente: Firebase** — se suscribe (`onSnapshot` de HOY) y lee días y archivos
+de Firestore; jamás lista el bucket por su cuenta. **La app ya ni siquiera
 toca el bucket para repararlo**: eso lo hace la otra función,
-`regenerate-tree` (deploy con `npm run infra:regenerate`), que se despierta
-cuando la app escribe la orden en `regenerateTree/{capa}` y devuelve su
-progreso por el mismo documento. Recorre el bucket, compara cada día con
-una agregación —una lectura— y sólo abre los días que no coinciden,
-escribiendo el diff sin borrar nada nacido después del inicio del escaneo.
-Es el remedio para cuando se perdió la confianza: fantasmas por borrados a
-mano, notificaciones perdidas o la función del índice caída. GCS lo toca la
-app en un solo lugar: el **viewer**, un objeto por click.
+`regenerate-tree`, que se despierta cuando la app escribe la orden en
+`regenerateTree/{capa}` y devuelve su progreso por el mismo documento.
+Recorre el bucket, compara cada día con una agregación —una lectura— y sólo
+abre los días que no coinciden, escribiendo el diff sin borrar nada nacido
+después del inicio del escaneo. Es el remedio para cuando se perdió la
+confianza: fantasmas por borrados a mano, notificaciones perdidas o la
+función del índice caída. GCS lo toca la app en un solo lugar: el
+**viewer**, un objeto por click.
+
+Ninguna de las dos funciones vive acá: son la plataforma, no el monitor —
+siguen corriendo con esta app desinstalada. Su fuente y sus despliegues
+están en el repo **`ingestor-infra`**, junto con el ingestor y su frente
+TLS. Lo que ese repo escribe y esta app lee está declarado de una sola vez
+en su `CONTRATO.md`; la copia local de esos nombres es
+[`src/shared/config.ts`](src/shared/config.ts).
 
 ## Cómo está organizado
 
 La lógica del proceso principal vive en `src/main`, con **una carpeta por
 sección de la app**: [`live/`](src/main/live), [`config/`](src/main/config) e
 [`ingestor-monitor/`](src/main/ingestor-monitor) — las pestañas Raw y
-Bronze, con su [README](src/main/ingestor-monitor/README.md) de qué hace
-cada pieza y qué cuesta cada llamada. En la raíz de `src/main` queda sólo lo
-que usan varias secciones: el `.env`, la app de Firebase, el cliente del
-lake, el puente IPC y el arranque de Electron. Los componentes que dibujan
-viven aparte, en `src/renderer`.
+Bronze. En la raíz de `src/main` queda sólo lo que usan varias secciones: el
+`.env`, la app de Firebase, el cliente del lake, el puente IPC y el arranque
+de Electron. Los componentes que dibujan viven aparte, en `src/renderer`.
+
+`ingestor-monitor/` son siete archivos de código y nada más:
+
+```
+todayFSM/     el día UTC. Lo ÚNICO que mira el reloj; avisa cuando cambia
+data/
+  todayTree/       hoy, por suscripción — la única conexión abierta
+  historicalTree/  desde ayer hacia atrás, por agregaciones — un GET por día
+  reconciler/      une las dos y exporta EL cliente: tree.bronze.days(),
+                   .freshness(), .latest()… Los indicadores lo consumen en
+                   una línea
+viewer/       abrir UN archivo: bajarlo, mostrarlo con DuckDB, borrarlo
+              (viewer.ts + duckdb.ts)
+index.ts      la fachada: cablea las piezas y no tiene lógica
+```
+
+El detalle de qué cuesta cada llamada está en su
+[README](src/main/ingestor-monitor/README.md), y los términos del dominio
+en el [GLOSARIO](src/main/ingestor-monitor/GLOSARIO.md).
 
 ## Arranque
 
@@ -96,6 +122,7 @@ npm run dev
 ## Tests
 
 ```bash
-npm test        # parseo de la RTDB, precedencia del catálogo, frescura, clases de ops de GCS
+npm test        # reglas del árbol mergeado, parseo de la RTDB, FSM del día,
+                # precedencia del catálogo, clases de ops de GCS
 npm run typecheck
 ```

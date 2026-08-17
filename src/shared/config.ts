@@ -18,8 +18,13 @@ export const SETTINGS_DOC = {
 /**
  * Raíz del índice del bucket en Firestore, como relación de colecciones:
  * inventory/{capa}/days/{día} (marcador) /files/{nombre} (peso y fecha).
- * Lo alimenta la función de las notificaciones del lake (ver infra/); sólo
- * hechos — los totales se agregan al leer.
+ * Lo alimenta la función de las notificaciones del lake; sólo hechos — los
+ * totales se agregan al leer.
+ *
+ * ESTOS NOMBRES SON CONTRATO con el repo `ingestor-infra`, que es quien
+ * escribe estos documentos. La declaración vive allá (`CONTRATO.md`); acá
+ * hay una copia que ningún compilador verifica. Cambiar uno obliga a
+ * cambiarlo en los dos lados.
  */
 export const INVENTORY_COLLECTION = 'inventory'
 
