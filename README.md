@@ -1,128 +1,55 @@
 # Ingestor Monitor
 
-**LA aplicación** del Analizer: quién está en el sitio ahora mismo y cómo
-está el ingestor. **Nada local** — la app no guarda data en disco: lo
-persistente vive en Firebase, y el lake (GCS) se toca sólo para ver un
-archivo o reparar el índice. La transformación (bronze → silver → gold)
-vive en BigQuery.
-
-(Los proyectos `data-analizer-app` y `data-analizer-studio` fueron los
-donantes de código y quedan para retirar; la carpeta
-`Desktop/data-analizer-data` ya no se usa.)
+El monitor del pipeline: quién está en el sitio ahora mismo y qué hay en el
+lake. Lo persistente vive en db y el bucket se toca
+sólo para ver un archivo. La transformación (bronze → silver → gold) vive en
+BigQuery.
 
 ## Pestañas
 
-**Vivo ●** — las pestañas abiertas ahora mismo (Realtime Database):
-planisferio, lista de pestañas y detalle de eventos. **No hay noción de
-sesión**: cada pestaña abierta es un nodo y desaparece sola al cerrarse;
-**Personas ahora** las agrupa por `anonymous_id` y **Mirando** cuenta las
-que tienen la página al frente. El punto rojo titila porque es una
-transmisión. Labels y grupos salen de `schemas/event-types.json` del lake —
-el catálogo que la suite publica desde sus propios enums (behavior +
-business) con `npm run publish:event-types` en el repo `events-suite`.
+| | Qué muestra |
+| --- | --- |
+| **Vivo ●** | Las pestañas abiertas ahora mismo: planisferio, lista y detalle de eventos. Sale de la Realtime Database, en vivo. |
+| **Raw** | La capa cruda del lake: arriba el log de hoy, abajo el árbol de días. |
+| **Bronze** | Lo mismo sobre la capa ya parseada, donde cada archivo trae una fila por evento. |
+| **Config** | El semáforo del ingestor, el uso de Firebase y Google Cloud, y el remedio del índice. |
 
-**Raw** y **Bronze** — navegadores del lake, cada una con su punto de
-frescura (verde = data de HOY UTC; naranja = de ayer a 6 días; violeta =
-una semana o más; negro = nunca entró nada — días de calendario, jamás
-ventanas móviles). Arriba, el **log de lo que aterrizó hoy** (UTC, en vivo
-por la suscripción), con **Ver** que abre la vista previa del archivo.
-Abajo, el árbol para la historia: días con buscador → click en un día →
-sus **archivos** (nombre, peso y fecha) →
-click en un nombre → el **viewer de ese archivo**, bajado de GCS al
-momento a un temporal que DuckDB lee y se borra al instante — en raw una
-fila por request HTTP, en bronze una por evento, con **Ver** por registro.
-Cada click paga exactamente un objeto; las credenciales jamás viajan en
-SQL ni en la línea de comandos. **Regenerate tree in DB** (el remedio
-manual) vive en la pestaña Config.
+## Conceptos
 
-**Config** — la guardia y la operación: el semáforo del ingestor (probe
-TCP cada 5 min); los accesos **GC · facturación ↗** y **Firebase · uso ↗**
-— el informe de la cuenta completa y el panel de uso del proyecto,
-abiertos EN EL NAVEGADOR con tu sesión (la consola de Google no se puede
-embeber: sus páginas rechazan iframes y su login no corre embebido); el
-**Regenerate tree in DB** por capa — el remedio manual: la app deja la
-orden en la base y una Cloud Function recorre el bucket y repara el índice,
-con el progreso a la vista; el **uso de Firebase** — lecturas, escrituras y borrados de
-Firestore de HOY, y bajada/conexiones/almacenado de la RTDB — y el **uso
-de Google Cloud** — almacenado del lake (según el índice), operaciones
-clase A/B y servido de GCS, salida de red de la VM, ejecuciones de la
-función del índice, Pub/Sub y Artifact Registry, por MES calendario —
-ambos vía Cloud Monitoring (gratis a este volumen; una consulta al abrir
-+ botón), cada métrica con su porcentaje de la capa Always Free entre
-paréntesis (amarillo si pasa de 75 %, rojo si pasa de 90 %). La app no
-muestra plata: para los números facturados están los botones a la
-consola. El log de ingestados vive en la pestaña de cada capa.
+- **Capa** — raw (como llegó) y bronze (parseado, en parquet).
+- **Índice** — el espejo del bucket en Firestore. La app lee esto, nunca el bucket.
+- **Árbol** — los días de una capa, con cuántos archivos y cuánto pesan.
+- **Log** — los últimos archivos que aterrizaron hoy, en vivo.
+- **Frescura** — el punto de cada pestaña: verde hoy · naranja 1-6 días · violeta ≥7 · negro nunca.
+- **Viewer** — click en un archivo: se baja, DuckDB lo muestra, se borra.
+- **Personas** y **Mirando** — pestañas agrupadas por persona, y las que tienen la página al frente.
+- **Regenerate tree in DB** — reconstruir el índice desde el bucket. El remedio, no la rutina.
+- **Día UTC** — todo se corta ahí.
 
-## El índice (Firestore) y quién lo alimenta
+## El código
 
-El índice del bucket vive en Firestore como relación de colecciones —
-`inventory/{capa}/days/{día}` (marcador) `/files/{nombre}` (peso y fecha) —
-y **sólo hechos**: nada derivado. Los totales por día se piden con
-agregaciones del lado del servidor (viajan números, no documentos).
-
-Lo alimenta **exclusivamente la función `index-writer`** (Cloud Functions
-gen2) desde las notificaciones Pub/Sub del bucket: cada archivo que aterriza
-está en el índice en segundos, con la app cerrada. **La app tiene UNA sola
-fuente: Firebase** — se suscribe (`onSnapshot` de HOY) y lee días y archivos
-de Firestore; jamás lista el bucket por su cuenta. **La app ya ni siquiera
-toca el bucket para repararlo**: eso lo hace la otra función,
-`regenerate-tree`, que se despierta cuando la app escribe la orden en
-`regenerateTree/{capa}` y devuelve su progreso por el mismo documento.
-Recorre el bucket, compara cada día con una agregación —una lectura— y sólo
-abre los días que no coinciden, escribiendo el diff sin borrar nada nacido
-después del inicio del escaneo. Es el remedio para cuando se perdió la
-confianza: fantasmas por borrados a mano, notificaciones perdidas o la
-función del índice caída. GCS lo toca la app en un solo lugar: el
-**viewer**, un objeto por click.
-
-Ninguna de las dos funciones vive acá: son la plataforma, no el monitor —
-siguen corriendo con esta app desinstalada. Su fuente y sus despliegues
-están en el repo **`ingestor-infra`**, junto con el ingestor y su frente
-TLS. Lo que ese repo escribe y esta app lee está declarado de una sola vez
-en su `CONTRATO.md`; la copia local de esos nombres es
-[`src/shared/config.ts`](src/shared/config.ts).
-
-## Cómo está organizado
-
-La lógica del proceso principal vive en `src/main`, con **una carpeta por
-sección de la app**: [`live/`](src/main/live), [`config/`](src/main/config) e
-[`ingestor-monitor/`](src/main/ingestor-monitor) — las pestañas Raw y
-Bronze. En la raíz de `src/main` queda sólo lo que usan varias secciones: el
-`.env`, la app de Firebase, el cliente del lake, el puente IPC y el arranque
-de Electron. Los componentes que dibujan viven aparte, en `src/renderer`.
-
-`ingestor-monitor/` son siete archivos de código y nada más:
-
-```
-todayFSM/     el día UTC. Lo ÚNICO que mira el reloj; avisa cuando cambia
-data/
-  todayTree/       hoy, por suscripción — la única conexión abierta
-  historicalTree/  desde ayer hacia atrás, por agregaciones — un GET por día
-  reconciler/      une las dos y exporta EL cliente: tree.bronze.days(),
-                   .freshness(), .latest()… Los indicadores lo consumen en
-                   una línea
-viewer/       abrir UN archivo: bajarlo, mostrarlo con DuckDB, borrarlo
-              (viewer.ts + duckdb.ts)
-index.ts      la fachada: cablea las piezas y no tiene lógica
-```
-
-El detalle de qué cuesta cada llamada está en su
-[README](src/main/ingestor-monitor/README.md), y los términos del dominio
-en el [GLOSARIO](src/main/ingestor-monitor/GLOSARIO.md).
+- [`src/main/live/`](src/main/live) — Vivo.
+- [`src/main/ingestor-monitor/`](src/main/ingestor-monitor) — Raw y Bronze
+- [`src/main/config/`](src/main/config) — Config.
+  ([README](src/main/ingestor-monitor/README.md) ·
+  [glosario](src/main/ingestor-monitor/GLOSARIO.md)).
+- `src/renderer/` — todo lo que dibuja.
+- La raíz de `src/main` es sólo lo compartido: el `.env`, Firebase, el lake,
+  el IPC y el arranque de Electron.
 
 ## Arranque
 
 ```bash
 npm install
-winget install DuckDB.cli    # para las muestras
+winget install DuckDB.cli    # para el viewer
 copy .env.example .env       # completar credenciales
 npm run dev
 ```
 
-## Tests
-
 ```bash
-npm test        # reglas del árbol mergeado, parseo de la RTDB, FSM del día,
-                # precedencia del catálogo, clases de ops de GCS
+npm test
 npm run typecheck
 ```
+
+---
+

@@ -20,10 +20,17 @@ Monitoring
 - Excepción: el almacenado del lake no consulta nada — sale del árbol
   mergeado que el ingestor monitor ya tiene en memoria.
 
-**3. Regenerate tree in DB**
+**3. Regenerate tree in DB** · `regenerateTree.ts`, acá mismo
 
-- Se dispara acá; la orden la escribe el ingestor monitor, que es el dueño
-  del índice, y el trabajo lo hace una Cloud Function del lado de Google.
+- Vive acá entero, que es donde está su botón: escribe la orden en
+  `regenerateTree/{capa}` y se queda suscripto a ese mismo documento, por
+  donde la función va contando su progreso.
+- El trabajo lo hace una Cloud Function del lado de Google; la app deja el
+  pedido y puede cerrarse.
+- Único cruce con otra sección: cuando una capa termina, llama a
+  `reloadHistoricalTree` del ingestor monitor — los días viejos no tienen
+  suscripción que los despierte, así que su foto en memoria no se enteraría
+  sola de lo que la función acaba de reparar.
 
 **4. Botones de consola**
 

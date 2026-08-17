@@ -35,7 +35,7 @@ respetarlo.
 | **Época** | Los diez dígitos con que arranca el nombre de cada archivo: los segundos desde 1970 al momento del flush. |
 | **Día UTC** | El día de calendario en Greenwich. Todo se corta así — la medianoche UTC son las 21:00 en Argentina. |
 | **Rollover** | El cambio de día UTC. En el código, el aviso `{from, to}` de la FSM. |
-| **Ingesta** | Que entren datos: sesiones del sitio llegando al ingestor y terminando en el lake. |
+| **Ingesta** | Que entren datos: eventos del sitio llegando al ingestor y terminando en el lake. |
 
 ## Las piezas de esta carpeta
 

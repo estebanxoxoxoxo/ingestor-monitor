@@ -1,5 +1,5 @@
 # ── Secretos ──────────────────────────────────────────────────
-# El .env tiene claves de AWS y la private key del service account.
+# El .env tiene la private key de la service account de Firebase.
 .env
 .env.*
 !.env.example

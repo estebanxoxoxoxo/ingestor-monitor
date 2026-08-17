@@ -1,15 +1,22 @@
 # Live — quién está en el sitio ahora mismo
 
-Las sesiones abiertas en este momento.
+Las **pestañas** abiertas en este momento. No hay noción de sesión: cada
+pestaña abierta es una entrada, y desaparece sola cuando se cierra.
 
-**1. Suscripción a las sesiones** · `activeSessions` en la Realtime
+**1. Suscripción a las pestañas** · `activeSessions` en la Realtime
 Database — queda abierta
 
-- Trae: las sesiones vivas, y cada cambio apenas ocurre. El cliente escribe
-  su entrada al conectarse; Firebase la borra al desconectarse.
+- Trae: las pestañas vivas, y cada cambio apenas ocurre. El cliente escribe
+  su entrada al conectarse; Firebase la borra al desconectarse, del lado del
+  servidor. El nodo se sigue llamando `activeSessions` por herencia: cada
+  hijo es una pestaña.
 - Emite: como mucho una actualización cada 400 ms, siempre con el último
-  estado — con varias sesiones son muchos avisos por segundo.
-- Usa: el planisferio, la lista de sesiones, el detalle de eventos.
+  estado — con varias pestañas son muchos avisos por segundo.
+- Deriva dos números que la entrada no trae: **personas** = pestañas
+  distintas por `anonymous_id` (dos pestañas de la misma persona cuentan
+  una), y **mirando** = las que tienen `visible`. Sin ese campo se asume
+  que está al frente.
+- Usa: el planisferio, la lista de pestañas, el detalle de eventos.
 
 **2. Catálogo de eventos** · `schemas/event-types.json` del lake
 
