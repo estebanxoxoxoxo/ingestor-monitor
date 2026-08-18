@@ -1,0 +1,26 @@
+# Ninguna dependencia recién publicada entra acá: pnpm sólo resuelve
+# versiones con al menos 60 días (86.400 minutos) desde su publicación.
+#
+# Por qué: la ventana en que se descubre un paquete comprometido —o una
+# versión que rompe— se mide en horas o días. Esperar dos meses deja que la
+# comunidad encuentre el problema antes que nosotros, y no congela nada:
+# `pnpm update` sigue trayendo lo nuevo, con dos meses de atraso.
+#
+# Se nota al instalar: si un rango pide algo más nuevo, pnpm elige la versión
+# anterior que cumpla la edad.
+minimumReleaseAge: 86400
+
+# Los scripts de postinstall son EL vector de la cadena de suministro, así que
+# pnpm los bloquea a todos y acá se habilita sólo lo que hace falta. Cada vez
+# que aparezca uno nuevo en la lista de ignorados, hay que decidirlo a mano —
+# no habilitarlo por inercia.
+allowBuilds:
+  # Su postinstall no hace nada sin FIREBASE_WEBAPP_CONFIG en el entorno,
+  # que es para auto-configurar apps web en hosting. Acá sobra.
+  '@firebase/util': false
+  # Copia el 7-zip de la arquitectura a vendor/7z.exe. Sólo lo necesita
+  # `pnpm dist`; sin esto falla el armado del instalador de Windows.
+  electron-winstaller: true
+  esbuild: true
+  # Arma sus tipos generados; lo arrastran firebase-admin y @google-cloud.
+  protobufjs: true

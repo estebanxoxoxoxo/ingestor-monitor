@@ -19,7 +19,7 @@ export interface CatalogDeps {
 /**
  * El catálogo declarado es `schemas/event-types.json` del lake: lo publica
  * la suite desde sus propios enums (behavior + business) con
- * `npm run publish:event-types` en el repo de la landing. Se lee DIRECTO
+ * `npm run publish:event-types` en el repo `events-suite`. Se lee DIRECTO
  * del lake, en memoria, y se cachea la corrida entera: los contratos
  * cambian con un publish, no por minuto — reabrir la app los relee.
  */

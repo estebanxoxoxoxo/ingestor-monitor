@@ -5,6 +5,7 @@ lake. Lo persistente vive en db y el bucket se toca
 sólo para ver un archivo. La transformación (bronze → silver → gold) vive en
 BigQuery.
 
+
 ## Pestañas
 
 | | Qué muestra |
@@ -39,17 +40,18 @@ BigQuery.
 
 ## Arranque
 
-```bash
-npm install
-winget install DuckDB.cli    # para el viewer
-copy .env.example .env       # completar credenciales
-npm run dev
-```
+`setup` habilita pnpm, instala y trae el DuckDB CLI, que es con lo que el viewer abre cada archivo; va con npm porque en un clon nuevo pnpm todavía no existe. El `.env` lo copia y completa cada dev a mano: son secretos.
 
 ```bash
-npm test
-npm run typecheck
+pnpm test
+pnpm typecheck
 ```
+
+Las dependencias se instalan con **al menos 60 días de publicadas**
+(`minimumReleaseAge` en `pnpm-workspace.yaml`): el tiempo en que se descubre
+un paquete comprometido se mide en días, así que esperamos a que lo
+encuentren otros. Y los scripts de postinstall están bloqueados salvo los
+tres habilitados uno por uno en `allowBuilds`.
 
 ---
 

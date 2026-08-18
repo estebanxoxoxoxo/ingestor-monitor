@@ -1,7 +1,7 @@
 /**
  * Catálogo DECLARADO de eventos: `schemas/event-types.json` del lake, que
  * la suite publica desde sus enums (behavior + business) con
- * `npm run publish:event-types` en el repo de la landing.
+ * `npm run publish:event-types` en el repo `events-suite`.
  *
  * Hace falta porque los datos no pueden responder la pregunta: `event` es un
  * STRING abierto y un `SELECT DISTINCT` dice qué ocurrió, nunca qué puede
